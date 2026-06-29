@@ -572,15 +572,39 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
       let spreadsheetId: string | undefined;
       if (createResult && typeof createResult === "object") {
         const res = createResult as Record<string, unknown>;
-        spreadsheetId = res.spreadsheetId as string | undefined;
+        await appendLog(runId, `sheets_create response keys: ${Object.keys(res).join(", ")}`);
+
+        // Try multiple possible field names for the spreadsheet ID
+        spreadsheetId = (res.spreadsheetId || res.spreadsheet_id || res.id) as string | undefined;
+
         if (spreadsheetId) {
           sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
         } else if (res.url) {
           sheetUrl = res.url as string;
-          // Extract spreadsheet ID from URL if available
+          // Extract spreadsheet ID from URL
           const match = (res.url as string).match(/\/d\/([^/]+)/);
           if (match) spreadsheetId = match[1];
         }
+
+        // If still no spreadsheetId but we have a URL, try extracting from it
+        if (!spreadsheetId && sheetUrl) {
+          const match = sheetUrl.match(/\/d\/([^/]+)/);
+          if (match) spreadsheetId = match[1];
+        }
+
+        await appendLog(runId, `Extracted spreadsheetId: ${spreadsheetId || "NONE"}, sheetUrl: ${sheetUrl || "NONE"}`);
+      } else if (typeof createResult === "string") {
+        // The result might be a plain string (spreadsheetId or URL)
+        if (createResult.includes("spreadsheets/d/")) {
+          sheetUrl = createResult;
+          const match = createResult.match(/\/d\/([^/]+)/);
+          if (match) spreadsheetId = match[1];
+        } else {
+          // Assume it's a spreadsheet ID
+          spreadsheetId = createResult;
+          sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+        }
+        await appendLog(runId, `sheets_create returned string, spreadsheetId: ${spreadsheetId || "NONE"}`);
       }
 
       if (spreadsheetId) {
