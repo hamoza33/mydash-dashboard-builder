@@ -9,6 +9,6 @@
     "tests": "pass",
     "test_quality": "pass",
     "docker_build": "pass",
-    "summary": "TypeScript compiles cleanly (no source file errors). All 69 existing tests pass. Docker compose build completed on VPS. Test run triggered (ID: cmqysmf0900005xb1s5erbuvr). Output HTML is 35.5KB (under 60KB limit), contains all required elements: PAY constant with gzip+base64 data, CSS design system with correct variables, DM Mono font, scanline effect, sticky header, 6 KPI cards, 14 analytics charts, Lead Explorer with sortable/filterable/paged table, detail modal, DASHBOARD_DATA_API polling."
+    "summary": "TypeScript compiles cleanly (no source file errors). All 69 tests pass. Docker compose build completed on VPS. Test run triggered. Output HTML is ~35KB (under 60KB limit). Review issues addressed: XSS in sheetUrl fixed with JSON.stringify, carrier field populated from tracking data, funnel_url and UTM fields populated from raw lead data."
   }
 }
