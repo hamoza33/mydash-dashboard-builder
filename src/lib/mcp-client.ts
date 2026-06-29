@@ -20,6 +20,7 @@ interface JsonRpcResponse {
   id: number;
   result?: {
     content?: Array<{ type: string; text?: string }>;
+    isError?: boolean;
     [key: string]: unknown;
   };
   error?: {
@@ -140,6 +141,11 @@ export class McpClient {
         .filter((item) => item.type === "text" && item.text)
         .map((item) => item.text)
         .join("");
+
+      // Check if the MCP server returned an error message in the content
+      if (jsonRpc.result.isError || textContent.toLowerCase().startsWith("error executing tool")) {
+        return { success: false, error: textContent };
+      }
 
       // Try to parse as JSON, otherwise return as string
       try {

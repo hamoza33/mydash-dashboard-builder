@@ -557,116 +557,130 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
     let sheetUrl: string | undefined;
 
     if (sheetClient) {
-      const today = new Date().toISOString().split("T")[0];
-      const sheetTitle = `COD_LF_Full_Merged - ${productName} - ${today}`;
+      try {
+        const today = new Date().toISOString().split("T")[0];
+        const sheetTitle = `COD_LF_Full_Merged - ${productName} - ${today}`;
 
-      // Step 1: Create the spreadsheet
-      const createResult = await callMcpTool(
-        sheetClient,
-        "sheets_create",
-        { title: sheetTitle },
-        runId,
-        "Create spreadsheet"
-      );
+        // Step 1: Create the spreadsheet
+        const createResult = await callMcpTool(
+          sheetClient,
+          "sheets_create",
+          { title: sheetTitle },
+          runId,
+          "Create spreadsheet"
+        );
 
-      let spreadsheetId: string | undefined;
-      if (createResult && typeof createResult === "object") {
-        const res = createResult as Record<string, unknown>;
-        await appendLog(runId, `sheets_create response keys: ${Object.keys(res).join(", ")}`);
+        let spreadsheetId: string | undefined;
+        if (createResult && typeof createResult === "object") {
+          const res = createResult as Record<string, unknown>;
+          await appendLog(runId, `sheets_create response keys: ${Object.keys(res).join(", ")}`);
 
-        // Try multiple possible field names for the spreadsheet ID
-        spreadsheetId = (res.spreadsheetId || res.spreadsheet_id || res.id) as string | undefined;
+          // Try multiple possible field names for the spreadsheet ID
+          spreadsheetId = (res.spreadsheetId || res.spreadsheet_id || res.id) as string | undefined;
+
+          if (spreadsheetId) {
+            sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+          } else if (res.url) {
+            sheetUrl = res.url as string;
+            // Extract spreadsheet ID from URL
+            const match = (res.url as string).match(/\/d\/([^/]+)/);
+            if (match) spreadsheetId = match[1];
+          }
+
+          // If still no spreadsheetId but we have a URL, try extracting from it
+          if (!spreadsheetId && sheetUrl) {
+            const match = sheetUrl.match(/\/d\/([^/]+)/);
+            if (match) spreadsheetId = match[1];
+          }
+
+          await appendLog(runId, `Extracted spreadsheetId: ${spreadsheetId || "NONE"}, sheetUrl: ${sheetUrl || "NONE"}`);
+        } else if (typeof createResult === "string") {
+          // Check if the string is an error message
+          if (createResult.toLowerCase().startsWith("error")) {
+            await appendLog(runId, `sheets_create returned error: ${createResult}`);
+            // Don't set spreadsheetId - skip sheet writing
+          } else if (createResult.includes("spreadsheets/d/")) {
+            sheetUrl = createResult;
+            const match = createResult.match(/\/d\/([^/]+)/);
+            if (match) spreadsheetId = match[1];
+          } else if (/^[a-zA-Z0-9_-]+$/.test(createResult)) {
+            // Looks like a valid spreadsheet ID
+            spreadsheetId = createResult;
+            sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+          } else {
+            await appendLog(runId, `sheets_create returned unexpected string: ${createResult.slice(0, 100)}`);
+          }
+          if (spreadsheetId) {
+            await appendLog(runId, `sheets_create returned string, spreadsheetId: ${spreadsheetId}`);
+          }
+        }
 
         if (spreadsheetId) {
-          sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
-        } else if (res.url) {
-          sheetUrl = res.url as string;
-          // Extract spreadsheet ID from URL
-          const match = (res.url as string).match(/\/d\/([^/]+)/);
-          if (match) spreadsheetId = match[1];
-        }
+          // Step 2: Write all data (headers + rows) using sheets_batch_update_multi
+          const allValues: string[][] = [
+            reconciliationResult.headers,
+            ...reconciliationResult.rows,
+          ];
 
-        // If still no spreadsheetId but we have a URL, try extracting from it
-        if (!spreadsheetId && sheetUrl) {
-          const match = sheetUrl.match(/\/d\/([^/]+)/);
-          if (match) spreadsheetId = match[1];
-        }
+          // Split into batches of 5000 rows to avoid payload limits
+          const BATCH_SIZE = 5000;
+          const totalRows = allValues.length;
 
-        await appendLog(runId, `Extracted spreadsheetId: ${spreadsheetId || "NONE"}, sheetUrl: ${sheetUrl || "NONE"}`);
-      } else if (typeof createResult === "string") {
-        // The result might be a plain string (spreadsheetId or URL)
-        if (createResult.includes("spreadsheets/d/")) {
-          sheetUrl = createResult;
-          const match = createResult.match(/\/d\/([^/]+)/);
-          if (match) spreadsheetId = match[1];
-        } else {
-          // Assume it's a spreadsheet ID
-          spreadsheetId = createResult;
-          sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
-        }
-        await appendLog(runId, `sheets_create returned string, spreadsheetId: ${spreadsheetId || "NONE"}`);
-      }
-
-      if (spreadsheetId) {
-        // Step 2: Write all data (headers + rows) using sheets_batch_update_multi
-        const allValues: string[][] = [
-          reconciliationResult.headers,
-          ...reconciliationResult.rows,
-        ];
-
-        // Split into batches of 5000 rows to avoid payload limits
-        const BATCH_SIZE = 5000;
-        const totalRows = allValues.length;
-
-        if (totalRows <= BATCH_SIZE) {
-          await callMcpTool(
-            sheetClient,
-            "sheets_batch_update_multi",
-            {
-              spreadsheet_id: spreadsheetId,
-              data: [
-                {
-                  range: `Sheet1!A1:AS${totalRows}`,
-                  values: allValues,
-                },
-              ],
-              value_input_option: "RAW",
-            },
-            runId,
-            `Write ${totalRows} rows to sheet`
-          );
-        } else {
-          // Write in chunks
-          const chunks: { range: string; values: string[][] }[] = [];
-          for (let i = 0; i < totalRows; i += BATCH_SIZE) {
-            const chunk = allValues.slice(i, i + BATCH_SIZE);
-            chunks.push({
-              range: `Sheet1!A${i + 1}:AS${i + chunk.length}`,
-              values: chunk,
-            });
+          if (totalRows <= BATCH_SIZE) {
+            await callMcpTool(
+              sheetClient,
+              "sheets_batch_update_multi",
+              {
+                spreadsheet_id: spreadsheetId,
+                data: [
+                  {
+                    range: `Sheet1!A1:AS${totalRows}`,
+                    values: allValues,
+                  },
+                ],
+                value_input_option: "RAW",
+              },
+              runId,
+              `Write ${totalRows} rows to sheet`
+            );
+          } else {
+            // Write in chunks
+            const chunks: { range: string; values: string[][] }[] = [];
+            for (let i = 0; i < totalRows; i += BATCH_SIZE) {
+              const chunk = allValues.slice(i, i + BATCH_SIZE);
+              chunks.push({
+                range: `Sheet1!A${i + 1}:AS${i + chunk.length}`,
+                values: chunk,
+              });
+            }
+            await callMcpTool(
+              sheetClient,
+              "sheets_batch_update_multi",
+              {
+                spreadsheet_id: spreadsheetId,
+                data: chunks,
+                value_input_option: "RAW",
+              },
+              runId,
+              `Write ${totalRows} rows to sheet in ${chunks.length} chunks`
+            );
           }
-          await callMcpTool(
-            sheetClient,
-            "sheets_batch_update_multi",
-            {
-              spreadsheet_id: spreadsheetId,
-              data: chunks,
-              value_input_option: "RAW",
-            },
-            runId,
-            `Write ${totalRows} rows to sheet in ${chunks.length} chunks`
-          );
+
+          await appendLog(runId, `Sheet created: ${sheetUrl}`);
+        } else {
+          await appendLog(runId, "WARN: Could not extract spreadsheet ID from sheets_create response");
         }
 
-        await appendLog(runId, `Sheet created: ${sheetUrl}`);
-      }
-
-      // Update run with sheet URL
-      if (sheetUrl) {
-        await prisma.dashboardRun.update({
-          where: { id: runId },
-          data: { sheetUrl },
-        });
+        // Update run with sheet URL
+        if (sheetUrl) {
+          await prisma.dashboardRun.update({
+            where: { id: runId },
+            data: { sheetUrl },
+          });
+        }
+      } catch (sheetError) {
+        const msg = sheetError instanceof Error ? sheetError.message : String(sheetError);
+        await appendLog(runId, `WARN: Sheet creation failed (non-fatal): ${msg}`);
       }
     } else {
       await appendLog(runId, "SKIP: Sheet creation - SHEET_MCP_URL not configured");
