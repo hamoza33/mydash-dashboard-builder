@@ -389,6 +389,55 @@ function generateSlug(productName: string, date: string): string {
 }
 
 /**
+ * Builds a map from tracking number to carrier name from raw tracking data.
+ * Tracking MCP responses typically include carrier/carrier_name per shipment.
+ */
+function buildCarrierMap(trackingData: Record<string, unknown>[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const item of trackingData) {
+    const waybill = String(
+      item.waybill || item.tracking_number || item.awb || ""
+    ).trim();
+    const carrier = String(
+      item.carrier || item.carrier_name || item.courier || ""
+    ).trim();
+    if (waybill && carrier) {
+      map[waybill] = carrier;
+    }
+  }
+  return map;
+}
+
+/**
+ * Builds a map from lead_id to extra fields (funnel_url, utm_source, utm_medium, utm_campaign)
+ * from the raw COD leads data which may contain these fields.
+ */
+function buildExtraLeadData(
+  codLeads: Record<string, unknown>[]
+): Record<string, { funnel_url?: string; utm_source?: string; utm_medium?: string; utm_campaign?: string }> {
+  const map: Record<string, { funnel_url?: string; utm_source?: string; utm_medium?: string; utm_campaign?: string }> = {};
+  for (const lead of codLeads) {
+    const leadId = String(lead.lead_id || lead.id || "").trim();
+    if (!leadId) continue;
+
+    const funnelUrl = String(lead.funnel_url || lead.page_url || lead.landing_page || "").trim();
+    const utmSource = String(lead.utm_source || "").trim();
+    const utmMedium = String(lead.utm_medium || "").trim();
+    const utmCampaign = String(lead.utm_campaign || "").trim();
+
+    if (funnelUrl || utmSource || utmMedium || utmCampaign) {
+      map[leadId] = {
+        ...(funnelUrl ? { funnel_url: funnelUrl } : {}),
+        ...(utmSource ? { utm_source: utmSource } : {}),
+        ...(utmMedium ? { utm_medium: utmMedium } : {}),
+        ...(utmCampaign ? { utm_campaign: utmCampaign } : {}),
+      };
+    }
+  }
+  return map;
+}
+
+/**
  * Main pipeline processor.
  * Orchestrates the full dashboard pipeline from prompt loading through deployment.
  */
@@ -676,6 +725,8 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
       reconciliationRows: reconciliationResult.rows,
       sheetUrl,
       dashboardSlug: slug,
+      carrierByTracking: buildCarrierMap(trackingData),
+      extraLeadData: buildExtraLeadData(codLeads),
     });
 
     // Step 9: Deploy dashboard via deploy_dashboard on IMPORT BOND

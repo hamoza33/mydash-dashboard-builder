@@ -15,6 +15,10 @@ export interface DashboardBuilderConfig {
   reconciliationRows: string[][];
   sheetUrl?: string;
   dashboardSlug: string;
+  /** Maps tracking number to carrier name (e.g. "ARAMEX", "SMSA") */
+  carrierByTracking?: Record<string, string>;
+  /** Maps lead_id to extra fields not available in the reconciliation columns */
+  extraLeadData?: Record<string, { funnel_url?: string; utm_source?: string; utm_medium?: string; utm_campaign?: string }>;
 }
 
 interface DashboardRow {
@@ -79,15 +83,27 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function transformRow(row: string[]): DashboardRow {
+function transformRow(
+  row: string[],
+  carrierByTracking?: Record<string, string>,
+  extraLeadData?: Record<string, { funnel_url?: string; utm_source?: string; utm_medium?: string; utm_campaign?: string }>
+): DashboardRow {
   const firstName = (row[2] || "").trim();
   const lastName = (row[3] || "").trim();
   const leadName = [firstName, lastName].filter(Boolean).join(" ");
   const trackStatus = row[23] || "";
   const normStatus = normalizeStatus(trackStatus);
+  const trackingNumber = row[22] || "";
+  const leadId = row[0] || "";
+
+  // Look up carrier from tracking data
+  const carrier = (trackingNumber && carrierByTracking?.[trackingNumber]) || "";
+
+  // Look up extra lead fields (funnel_url, utm)
+  const extra = leadId ? extraLeadData?.[leadId] : undefined;
 
   return {
-    lead_id: row[0] || "",
+    lead_id: leadId,
     lead_status: row[20] || "",
     lead_date: row[1] || "",
     lead_name: leadName,
@@ -103,9 +119,9 @@ function transformRow(row: string[]): DashboardRow {
     order_total: parseNum(row[16]),
     order_qty: parseNum(row[14]),
     order_date: row[1] || "",
-    tracking: row[22] || "",
+    tracking: trackingNumber,
     track_status: trackStatus,
-    carrier: "",
+    carrier,
     norm_status: normStatus,
     latest_status: trackStatus,
     status_detail: "",
@@ -117,10 +133,10 @@ function transformRow(row: string[]): DashboardRow {
     lf_date: "",
     lf_total: parseNum(row[16]),
     lf_fin_status: row[36] || "",
-    funnel_url: "",
-    utm_source: row[30] || "",
-    utm_medium: "",
-    utm_campaign: row[31] || "",
+    funnel_url: extra?.funnel_url || "",
+    utm_source: extra?.utm_source || row[30] || "",
+    utm_medium: extra?.utm_medium || "",
+    utm_campaign: extra?.utm_campaign || row[31] || "",
   };
 }
 
@@ -157,10 +173,12 @@ function render(){TAB==='ana'?renderAna():renderExp()}async function boot(){let 
  * Self-contained with inline CSS/JS, under 60KB.
  */
 export function buildDashboardHtml(config: DashboardBuilderConfig): string {
-  const { productName, dateFrom, dateTo, reconciliationRows, sheetUrl, dashboardSlug } = config;
+  const { productName, dateFrom, dateTo, reconciliationRows, sheetUrl, dashboardSlug, carrierByTracking, extraLeadData } = config;
 
   // Transform rows to dashboard JSON format
-  const dashboardData: DashboardRow[] = reconciliationRows.map(transformRow);
+  const dashboardData: DashboardRow[] = reconciliationRows.map(
+    (row) => transformRow(row, carrierByTracking, extraLeadData)
+  );
 
   // Gzip + base64 encode
   const jsonStr = JSON.stringify(dashboardData);
@@ -179,10 +197,9 @@ export function buildDashboardHtml(config: DashboardBuilderConfig): string {
   const dateRange = `${fmtDate(dateFrom)} \u2013 ${fmtDate(dateTo)}`;
 
   const safeTitle = escapeHtml(productName);
-  const safeSheetUrl = sheetUrl || "";
 
   const css = getCSS();
   const clientJS = getClientJS();
 
-  return `<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>${safeTitle}</title><link rel=preconnect href=https://fonts.googleapis.com><link rel=preconnect href=https://fonts.gstatic.com crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel=stylesheet><style>\n${css}\n</style><script>\nwindow.DASHBOARD_DATA_API="/data/${dashboardSlug}";\nwindow.DASHBOARD_SHEET_URL="${safeSheetUrl}";\n(function(){\n  var api=window.DASHBOARD_DATA_API;\n  var interval=30000;\n  function poll(){\n    fetch(api).then(function(r){return r.json()}).then(function(d){\n      window.DASHBOARD_LIVE_DATA=d;\n      window.dispatchEvent(new CustomEvent('dashboard-data-update',{detail:d}));\n    }).catch(function(){});\n  }\n  poll();\n  setInterval(poll,interval);\n})();\n</script></head><body><header id=top><div class=top1><div class=brand><h1>${safeTitle}</h1><div class=muted>${dateRange}</div></div><span class=badge id=leadBadge>0 leads</span><div class=stats id=qstats></div></div><div class=tabs><button class="tab on" data-t=ana>\ud83d\udcca Analytics</button><button class=tab data-t=exp>\ud83d\udccb Lead Explorer</button></div></header><main><section id=kpis class=kpis></section><section id=ana class="panel on"><div id=af class=filters></div><div class="grid g2"><div class=card><h2>Campaign Performance</h2><p class=sub>Conf % vs Delivery % \u00b7 sorted by volume</p><div id=camp></div></div><div class=card><h2>Carrier Performance</h2><p class=sub>Delivery vs Return rate per carrier</p><div id=car></div></div></div><div class="grid g3" style="margin-top:12px"><div class=card><h2>City Performance</h2><p class=sub>Delivery % by destination</p><div id=city></div></div><div class=card><h2>Lead \u2192 Delivery Funnel</h2><p class=sub>Drop-off at each stage</p><div id=fun></div></div><div class=card><h2>Return Reasons</h2><p class=sub>Why shipments failed</p><div id=ret></div></div></div><div class="grid g21" style="margin-top:12px"><div class=card><h2>Campaign \u00d7 Metrics Matrix</h2><p class=sub>Full stats \u2014 click header to sort</p><table id=mat class=matrix></table></div><div class=card><h2>Top Campaigns</h2><p class=sub>Score = 40% Conf + 60% Del</p><div id=topc class=leader></div></div></div><div class=card style="margin-top:12px"><h2>Daily Lead Volume</h2><p class=sub>Stacked by status \u2014 last 35 active days</p><div id=daily></div></div><div class="grid g3" style="margin-top:12px"><div class=card><h2>Price Tier Analysis</h2><p class=sub>Conf % / Del % per price point</p><div id=price></div></div><div class=card><h2>Tracking Status Mix</h2><p class=sub>Live status of all shipped orders</p><div id=mix></div></div><div class=card><h2>Order Qty Distribution</h2><p class=sub>Conf % / Del % by quantity ordered</p><div id=qty></div></div></div><div class="grid g3" style="margin-top:12px"><div class=card><h2>Country Performance</h2><p class=sub>Conf % / Del % by order country</p><div id=country></div></div><div class=card><h2>Funnel URL Performance</h2><p class=sub>Conf % / Del % per landing page</p><div id=url></div></div><div class=card><h2>UTM Source Breakdown</h2><p class=sub>Leads & rates per traffic source</p><div id=src></div></div></div></section><section id=exp class=panel><div id=ef class="filters ex"></div><div class=card><div class=pg><span id=ecnt></span><select id=ps><option>10</option><option selected>25</option><option>50</option></select><button id=prev>Prev</button><span id=pi></span><button id=next>Next</button></div><table id=lt class=tbl></table></div></section></main><div id=modal class=modal><div class=box><div class=mh><h2>Lead Detail</h2><button class=x id=close>\u2715</button></div><div id=details class=kv></div></div></div><script>\nconst PAY='${payloadBase64}';\n${clientJS}\n</script></body></html>`;
+  return `<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>${safeTitle}</title><link rel=preconnect href=https://fonts.googleapis.com><link rel=preconnect href=https://fonts.gstatic.com crossorigin><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap" rel=stylesheet><style>\n${css}\n</style><script>\nwindow.DASHBOARD_DATA_API="/data/${dashboardSlug}";\nwindow.DASHBOARD_SHEET_URL=${JSON.stringify(sheetUrl || "")};\n(function(){\n  var api=window.DASHBOARD_DATA_API;\n  var interval=30000;\n  function poll(){\n    fetch(api).then(function(r){return r.json()}).then(function(d){\n      window.DASHBOARD_LIVE_DATA=d;\n      window.dispatchEvent(new CustomEvent('dashboard-data-update',{detail:d}));\n    }).catch(function(){});\n  }\n  poll();\n  setInterval(poll,interval);\n})();\n</script></head><body><header id=top><div class=top1><div class=brand><h1>${safeTitle}</h1><div class=muted>${dateRange}</div></div><span class=badge id=leadBadge>0 leads</span><div class=stats id=qstats></div></div><div class=tabs><button class="tab on" data-t=ana>\ud83d\udcca Analytics</button><button class=tab data-t=exp>\ud83d\udccb Lead Explorer</button></div></header><main><section id=kpis class=kpis></section><section id=ana class="panel on"><div id=af class=filters></div><div class="grid g2"><div class=card><h2>Campaign Performance</h2><p class=sub>Conf % vs Delivery % \u00b7 sorted by volume</p><div id=camp></div></div><div class=card><h2>Carrier Performance</h2><p class=sub>Delivery vs Return rate per carrier</p><div id=car></div></div></div><div class="grid g3" style="margin-top:12px"><div class=card><h2>City Performance</h2><p class=sub>Delivery % by destination</p><div id=city></div></div><div class=card><h2>Lead \u2192 Delivery Funnel</h2><p class=sub>Drop-off at each stage</p><div id=fun></div></div><div class=card><h2>Return Reasons</h2><p class=sub>Why shipments failed</p><div id=ret></div></div></div><div class="grid g21" style="margin-top:12px"><div class=card><h2>Campaign \u00d7 Metrics Matrix</h2><p class=sub>Full stats \u2014 click header to sort</p><table id=mat class=matrix></table></div><div class=card><h2>Top Campaigns</h2><p class=sub>Score = 40% Conf + 60% Del</p><div id=topc class=leader></div></div></div><div class=card style="margin-top:12px"><h2>Daily Lead Volume</h2><p class=sub>Stacked by status \u2014 last 35 active days</p><div id=daily></div></div><div class="grid g3" style="margin-top:12px"><div class=card><h2>Price Tier Analysis</h2><p class=sub>Conf % / Del % per price point</p><div id=price></div></div><div class=card><h2>Tracking Status Mix</h2><p class=sub>Live status of all shipped orders</p><div id=mix></div></div><div class=card><h2>Order Qty Distribution</h2><p class=sub>Conf % / Del % by quantity ordered</p><div id=qty></div></div></div><div class="grid g3" style="margin-top:12px"><div class=card><h2>Country Performance</h2><p class=sub>Conf % / Del % by order country</p><div id=country></div></div><div class=card><h2>Funnel URL Performance</h2><p class=sub>Conf % / Del % per landing page</p><div id=url></div></div><div class=card><h2>UTM Source Breakdown</h2><p class=sub>Leads & rates per traffic source</p><div id=src></div></div></div></section><section id=exp class=panel><div id=ef class="filters ex"></div><div class=card><div class=pg><span id=ecnt></span><select id=ps><option>10</option><option selected>25</option><option>50</option></select><button id=prev>Prev</button><span id=pi></span><button id=next>Next</button></div><table id=lt class=tbl></table></div></section></main><div id=modal class=modal><div class=box><div class=mh><h2>Lead Detail</h2><button class=x id=close>\u2715</button></div><div id=details class=kv></div></div></div><script>\nconst PAY='${payloadBase64}';\n${clientJS}\n</script></body></html>`;
 }
