@@ -1,6 +1,6 @@
 /**
  * MCP Client wrapper that makes JSON-RPC 2.0 HTTP POST requests to configured
- * MCP endpoints with Bearer token auth. Handles errors gracefully.
+ * MCP endpoints with Bearer token auth. Supports both JSON and SSE responses.
  */
 
 export interface McpToolCall {
@@ -40,9 +40,42 @@ export class McpClient {
   }
 
   /**
+   * Parses a JSON-RPC response into an McpResponse.
+   */
+  private parseJsonRpcResponse(jsonRpc: JsonRpcResponse): McpResponse {
+    // Handle JSON-RPC error response
+    if (jsonRpc.error) {
+      return {
+        success: false,
+        error: `MCP RPC error (${jsonRpc.error.code}): ${jsonRpc.error.message}`,
+      };
+    }
+
+    // Extract data from JSON-RPC result
+    // MCP tools typically return content array with text items
+    if (jsonRpc.result?.content) {
+      const textContent = jsonRpc.result.content
+        .filter((item) => item.type === "text" && item.text)
+        .map((item) => item.text)
+        .join("");
+
+      // Try to parse as JSON, otherwise return as string
+      try {
+        const parsed = JSON.parse(textContent);
+        return { success: true, data: parsed };
+      } catch {
+        return { success: true, data: textContent };
+      }
+    }
+
+    return { success: true, data: jsonRpc.result };
+  }
+
+  /**
    * Calls an MCP tool using JSON-RPC 2.0 protocol.
    * POST to the MCP endpoint with:
    *   Authorization: Bearer {token}
+   *   Accept: application/json, text/event-stream
    *   Body: {"jsonrpc":"2.0","id":N,"method":"tools/call","params":{"name":"tool_name","arguments":{...}}}
    */
   async callTool(toolCall: McpToolCall): Promise<McpResponse> {
@@ -53,6 +86,7 @@ export class McpClient {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
           ...(this.authToken
             ? { Authorization: `Bearer ${this.authToken}` }
             : {}),
@@ -76,34 +110,41 @@ export class McpClient {
         };
       }
 
-      const jsonRpc = (await response.json()) as JsonRpcResponse;
+      const contentType = response.headers.get("content-type") || "";
 
-      // Handle JSON-RPC error response
-      if (jsonRpc.error) {
-        return {
-          success: false,
-          error: `MCP RPC error (${jsonRpc.error.code}): ${jsonRpc.error.message}`,
-        };
-      }
+      // Handle SSE (text/event-stream) responses
+      if (contentType.includes("text/event-stream")) {
+        const text = await response.text();
+        // Parse SSE format: look for data lines containing JSON-RPC response
+        const lines = text.split("\n");
+        let jsonRpc: JsonRpcResponse | null = null;
 
-      // Extract data from JSON-RPC result
-      // MCP tools typically return content array with text items
-      if (jsonRpc.result?.content) {
-        const textContent = jsonRpc.result.content
-          .filter((item) => item.type === "text" && item.text)
-          .map((item) => item.text)
-          .join("");
-
-        // Try to parse as JSON, otherwise return as string
-        try {
-          const parsed = JSON.parse(textContent);
-          return { success: true, data: parsed };
-        } catch {
-          return { success: true, data: textContent };
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6).trim();
+            if (data) {
+              try {
+                const parsed = JSON.parse(data) as JsonRpcResponse;
+                if (parsed.jsonrpc === "2.0") {
+                  jsonRpc = parsed;
+                }
+              } catch {
+                // Not JSON, skip
+              }
+            }
+          }
         }
+
+        if (!jsonRpc) {
+          return { success: false, error: "No valid JSON-RPC response in SSE stream" };
+        }
+
+        return this.parseJsonRpcResponse(jsonRpc);
       }
 
-      return { success: true, data: jsonRpc.result };
+      // Handle regular JSON responses
+      const jsonRpc = (await response.json()) as JsonRpcResponse;
+      return this.parseJsonRpcResponse(jsonRpc);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown error occurred";
