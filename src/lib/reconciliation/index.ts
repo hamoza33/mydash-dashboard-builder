@@ -78,24 +78,44 @@ export function reconcile(input: ReconciliationInput): ReconciliationResult {
   // Reconcile with tracking data
   let reconciledCount = 0;
   const trackingByPhone = new Map<string, Record<string, unknown>>();
+  const trackingByWaybill = new Map<string, Record<string, unknown>>();
 
   for (const tracking of trackingData) {
-    const rawPhone = String(tracking.phone || tracking.phone_number || "");
+    // Index by phone (normalized)
+    const rawPhone = String(tracking.phone || tracking.phone_number || tracking.consignee_phone || "");
     const normalized = normalizePhone(rawPhone, defaultCc);
     if (normalized) {
       trackingByPhone.set(normalized, tracking);
+    }
+    // Also index by waybill/tracking number for direct matching
+    const waybill = String(tracking.waybill || tracking.tracking_number || tracking.awb || "").trim();
+    if (waybill) {
+      trackingByWaybill.set(waybill, tracking);
     }
   }
 
   for (const row of allRows) {
     const normalizedPhone = row[5];
+    const existingTracking = row[22]; // W: Tracking Number from the order itself
+
+    // Try matching by phone first
     if (normalizedPhone && trackingByPhone.has(normalizedPhone)) {
       const tracking = trackingByPhone.get(normalizedPhone)!;
-      row[22] = String(tracking.tracking_number || tracking.tracking || ""); // W
-      row[23] = String(tracking.status || tracking.shipping_status || ""); // X
-      row[24] = String(tracking.shipped_date || ""); // Y
-      row[25] = String(tracking.delivered_date || ""); // Z
+      row[22] = String(tracking.tracking_number || tracking.waybill || tracking.awb || row[22] || ""); // W
+      row[23] = String(tracking.status || tracking.shipping_status || tracking.current_status || ""); // X
+      row[24] = String(tracking.shipped_date || tracking.ship_date || ""); // Y
+      row[25] = String(tracking.delivered_date || tracking.delivery_date || ""); // Z
       row[38] = "phone"; // AM: Match Type
+      row[39] = "yes"; // AN: Reconciled
+      reconciledCount++;
+    }
+    // Try matching by tracking number if we have one in the order
+    else if (existingTracking && trackingByWaybill.has(existingTracking)) {
+      const tracking = trackingByWaybill.get(existingTracking)!;
+      row[23] = String(tracking.status || tracking.shipping_status || tracking.current_status || ""); // X
+      row[24] = String(tracking.shipped_date || tracking.ship_date || ""); // Y
+      row[25] = String(tracking.delivered_date || tracking.delivery_date || ""); // Z
+      row[38] = "waybill"; // AM: Match Type
       row[39] = "yes"; // AN: Reconciled
       reconciledCount++;
     }

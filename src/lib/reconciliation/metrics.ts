@@ -62,7 +62,8 @@ export function formatRate(rate: number): string {
 
 /**
  * Counts shipment statuses from an array of records.
- * @param records - Array of records with a 'status' field
+ * Handles various status formats from different tracking MCPs.
+ * @param records - Array of records with a status field
  * @param statusField - The field name containing the shipment status
  */
 export function countShipmentStatuses(
@@ -77,23 +78,44 @@ export function countShipmentStatuses(
   };
 
   for (const record of records) {
-    const status = String(record[statusField] || "").toLowerCase().trim();
+    // Try multiple possible status field names
+    const rawStatus = record[statusField] || record.current_status || record.shipping_status || "";
+    const status = String(rawStatus).toLowerCase().trim();
 
     counts.shipped++;
 
-    if (status === "delivered" || status === "deliver" || status === "dlv") {
+    if (
+      status === "delivered" ||
+      status === "deliver" ||
+      status === "dlv" ||
+      status === "signed" ||
+      status === "pod" ||
+      status.includes("delivered")
+    ) {
       counts.delivered++;
     } else if (
       status === "returned" ||
       status === "return" ||
-      status === "rtn"
+      status === "rtn" ||
+      status === "rto" ||
+      status === "return_to_origin" ||
+      status.includes("returned") ||
+      status.includes("return")
     ) {
       counts.returned++;
     } else if (
       status === "pending" ||
       status === "in_transit" ||
       status === "transit" ||
-      status === "out_for_delivery"
+      status === "out_for_delivery" ||
+      status === "ofd" ||
+      status === "pickup" ||
+      status === "picked_up" ||
+      status === "dispatched" ||
+      status === "shipped" ||
+      status === "in transit" ||
+      status.includes("transit") ||
+      status.includes("pending")
     ) {
       counts.pending++;
     }

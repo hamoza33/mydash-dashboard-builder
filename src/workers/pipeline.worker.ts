@@ -94,6 +94,280 @@ export async function callMcpTool(
 }
 
 /**
+ * Fetches COD leads with pagination support.
+ * Tool: "cod_export_lead_inputs" on COD Network MCP
+ * Returns paginated results with has_more/next_offset pattern.
+ */
+async function fetchCodLeadsPaginated(
+  client: McpClient | null,
+  productName: string,
+  dateFrom: string,
+  dateTo: string,
+  runId: string
+): Promise<Record<string, unknown>[]> {
+  if (!client) {
+    await appendLog(runId, "SKIP: Fetch COD leads - MCP client not configured");
+    return [];
+  }
+
+  const allLeads: Record<string, unknown>[] = [];
+  let offset = 0;
+  let hasMore = true;
+  let pageCount = 0;
+
+  while (hasMore) {
+    pageCount++;
+    const args: Record<string, unknown> = {
+      product_name: productName,
+      since: dateFrom,
+      until: dateTo,
+      chunk_size: 2000,
+    };
+    if (offset > 0) {
+      args.offset = offset;
+    }
+
+    await appendLog(runId, `START: Fetch COD leads page ${pageCount} (offset=${offset})`);
+    const result = await client.callTool({ tool: "cod_export_lead_inputs", arguments: args });
+
+    if (!result.success) {
+      await appendLog(runId, `ERROR: Fetch COD leads page ${pageCount} - ${result.error}`);
+      throw new Error(`Fetch COD leads page ${pageCount} failed: ${result.error}`);
+    }
+
+    const data = result.data as Record<string, unknown>;
+    const leads = (data?.leads || []) as Record<string, unknown>[];
+    allLeads.push(...leads);
+
+    const totalMatched = data?.total_matched ?? 0;
+    const returned = data?.returned ?? leads.length;
+    hasMore = Boolean(data?.has_more);
+    offset = (data?.next_offset as number) || (offset + leads.length);
+
+    await appendLog(
+      runId,
+      `DONE: COD leads page ${pageCount}: got ${returned} records (total_matched=${totalMatched}, has_more=${hasMore})`
+    );
+  }
+
+  await appendLog(runId, `Fetched ${allLeads.length} total COD leads across ${pageCount} page(s)`);
+  return allLeads;
+}
+
+/**
+ * Fetches COD orders with pagination support.
+ * Tool: "cod_export_orders" on COD Network MCP
+ * Returns paginated results with has_more/next_offset pattern.
+ */
+async function fetchCodOrdersPaginated(
+  client: McpClient | null,
+  productName: string,
+  dateFrom: string,
+  dateTo: string,
+  runId: string
+): Promise<Record<string, unknown>[]> {
+  if (!client) {
+    await appendLog(runId, "SKIP: Fetch COD orders - MCP client not configured");
+    return [];
+  }
+
+  const allOrders: Record<string, unknown>[] = [];
+  let offset = 0;
+  let hasMore = true;
+  let pageCount = 0;
+
+  while (hasMore) {
+    pageCount++;
+    const args: Record<string, unknown> = {
+      product_name: productName,
+      since: dateFrom,
+      until: dateTo,
+      chunk_size: 2000,
+    };
+    if (offset > 0) {
+      args.offset = offset;
+    }
+
+    await appendLog(runId, `START: Fetch COD orders page ${pageCount} (offset=${offset})`);
+    const result = await client.callTool({ tool: "cod_export_orders", arguments: args });
+
+    if (!result.success) {
+      await appendLog(runId, `ERROR: Fetch COD orders page ${pageCount} - ${result.error}`);
+      throw new Error(`Fetch COD orders page ${pageCount} failed: ${result.error}`);
+    }
+
+    const data = result.data as Record<string, unknown>;
+    const orders = (data?.orders || []) as Record<string, unknown>[];
+    allOrders.push(...orders);
+
+    const totalMatched = data?.total_matched ?? 0;
+    const returned = data?.returned ?? orders.length;
+    hasMore = Boolean(data?.has_more);
+    offset = (data?.next_offset as number) || (offset + orders.length);
+
+    await appendLog(
+      runId,
+      `DONE: COD orders page ${pageCount}: got ${returned} records (total_matched=${totalMatched}, has_more=${hasMore})`
+    );
+  }
+
+  await appendLog(runId, `Fetched ${allOrders.length} total COD orders across ${pageCount} page(s)`);
+  return allOrders;
+}
+
+/**
+ * Fetches LightFunnels orders with cursor-based pagination.
+ * Tool: "lf_fetch_all_orders" on LightFunnels MCP
+ * Pagination via next_cursor until has_more = false.
+ */
+async function fetchLfOrdersPaginated(
+  client: McpClient | null,
+  lfProductId: string,
+  dateFrom: string,
+  runId: string
+): Promise<Record<string, unknown>[]> {
+  if (!client) {
+    await appendLog(runId, "SKIP: Fetch LightFunnels orders - MCP client not configured");
+    return [];
+  }
+
+  const allOrders: Record<string, unknown>[] = [];
+  let cursor: string | null = null;
+  let hasMore = true;
+  let pageCount = 0;
+
+  while (hasMore) {
+    pageCount++;
+    const args: Record<string, unknown> = {
+      query: `order_by:created_at order_dir:desc product_id:${lfProductId}`,
+      since_date: dateFrom,
+      limit: 100,
+      include_test: false,
+    };
+    if (cursor) {
+      args.cursor = cursor;
+    }
+
+    await appendLog(runId, `START: Fetch LightFunnels orders page ${pageCount}`);
+    const result = await client.callTool({ tool: "lf_fetch_all_orders", arguments: args });
+
+    if (!result.success) {
+      await appendLog(runId, `ERROR: Fetch LF orders page ${pageCount} - ${result.error}`);
+      throw new Error(`Fetch LF orders page ${pageCount} failed: ${result.error}`);
+    }
+
+    const data = result.data as Record<string, unknown>;
+    // LF response may have orders in "orders" or "data" array
+    const orders = (data?.orders || data?.data || []) as Record<string, unknown>[];
+    allOrders.push(...orders);
+
+    hasMore = Boolean(data?.has_more);
+    cursor = (data?.next_cursor as string) || null;
+
+    await appendLog(
+      runId,
+      `DONE: LF orders page ${pageCount}: got ${orders.length} records (has_more=${hasMore})`
+    );
+
+    // Safety: break if no cursor returned and has_more claims true
+    if (hasMore && !cursor) {
+      await appendLog(runId, "WARN: LF has_more=true but no next_cursor, stopping pagination");
+      break;
+    }
+  }
+
+  await appendLog(runId, `Fetched ${allOrders.length} total LF orders across ${pageCount} page(s)`);
+  return allOrders;
+}
+
+/**
+ * Fetches tracking data in batches of 50 waybills.
+ * Tool: "get_shipment_summary" on Tracking MCP
+ * Args: { waybills: string[], lang: "en" }
+ */
+async function fetchTrackingBatched(
+  client: McpClient | null,
+  trackingNumbers: string[],
+  runId: string
+): Promise<Record<string, unknown>[]> {
+  if (!client) {
+    await appendLog(runId, "SKIP: Fetch tracking - MCP client not configured");
+    return [];
+  }
+
+  if (trackingNumbers.length === 0) {
+    await appendLog(runId, "SKIP: Fetch tracking - no tracking numbers to look up");
+    return [];
+  }
+
+  const allResults: Record<string, unknown>[] = [];
+  const BATCH_SIZE = 50;
+  const batches = Math.ceil(trackingNumbers.length / BATCH_SIZE);
+
+  await appendLog(runId, `Fetching tracking for ${trackingNumbers.length} waybills in ${batches} batch(es)`);
+
+  for (let i = 0; i < batches; i++) {
+    const batch = trackingNumbers.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
+
+    await appendLog(runId, `START: Fetch tracking batch ${i + 1}/${batches} (${batch.length} waybills)`);
+    const result = await client.callTool({
+      tool: "get_shipment_summary",
+      arguments: { waybills: batch, lang: "en" },
+    });
+
+    if (!result.success) {
+      await appendLog(runId, `ERROR: Fetch tracking batch ${i + 1} - ${result.error}`);
+      // Continue with other batches rather than failing completely
+      continue;
+    }
+
+    const data = result.data;
+    // Response may be an array directly or wrapped in an object
+    if (Array.isArray(data)) {
+      allResults.push(...(data as Record<string, unknown>[]));
+    } else if (data && typeof data === "object") {
+      const obj = data as Record<string, unknown>;
+      const shipments = (obj.shipments || obj.data || obj.results || []) as Record<string, unknown>[];
+      if (Array.isArray(shipments)) {
+        allResults.push(...shipments);
+      }
+    }
+
+    await appendLog(runId, `DONE: Tracking batch ${i + 1}/${batches}`);
+  }
+
+  await appendLog(runId, `Fetched tracking data for ${allResults.length} shipments`);
+  return allResults;
+}
+
+/**
+ * Extracts tracking numbers from reconciled orders.
+ * Looks for tracking_number, tracking, or waybill fields in COD orders.
+ */
+function extractTrackingNumbers(
+  codOrders: Record<string, unknown>[],
+  codLeads: Record<string, unknown>[]
+): string[] {
+  const trackingSet = new Set<string>();
+
+  const allRecords = [...codOrders, ...codLeads];
+  for (const record of allRecords) {
+    const tn = String(
+      record.tracking_number ||
+      record.tracking ||
+      record.waybill ||
+      record.awb ||
+      ""
+    ).trim();
+    if (tn && tn !== "undefined" && tn !== "null") {
+      trackingSet.add(tn);
+    }
+  }
+
+  return Array.from(trackingSet);
+}
+
+/**
  * Main pipeline processor.
  * Orchestrates the full dashboard pipeline from prompt loading through deployment.
  */
@@ -139,52 +413,47 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
     await updateRunStatus(runId, "running_reconciliation_prompt", 1);
     await appendLog(runId, "Preparing reconciliation configuration...");
 
-    // Step 3: Fetch COD leads
+    // Step 3: Fetch COD leads using cod_export_lead_inputs with pagination
     await updateRunStatus(runId, "fetching_cod_leads", 2);
     const codClient = mcpClients.codNetwork();
-    const codLeadsResult = await callMcpTool(
+    const codLeads = await fetchCodLeadsPaginated(
       codClient,
-      "fetch_leads",
-      { productName, dateFrom, dateTo, defaultCc },
-      runId,
-      "Fetch COD leads"
+      productName,
+      dateFrom,
+      dateTo,
+      runId
     );
-    const codLeads = Array.isArray(codLeadsResult) ? codLeadsResult : [];
 
-    // Step 4: Fetch COD orders
+    // Step 4: Fetch COD orders using cod_export_orders with pagination
     await updateRunStatus(runId, "fetching_cod_orders", 3);
-    const codOrdersResult = await callMcpTool(
+    const codOrders = await fetchCodOrdersPaginated(
       codClient,
-      "fetch_orders",
-      { productName, dateFrom, dateTo },
-      runId,
-      "Fetch COD orders"
+      productName,
+      dateFrom,
+      dateTo,
+      runId
     );
-    const codOrders = Array.isArray(codOrdersResult) ? codOrdersResult : [];
 
-    // Step 5: Fetch LightFunnels orders
+    // Step 5: Fetch LightFunnels orders using lf_fetch_all_orders with cursor pagination
     await updateRunStatus(runId, "fetching_lightfunnels_orders", 4);
     const lfClient = mcpClients.lightfunnels();
-    const lfOrdersResult = await callMcpTool(
+    const lfOrders = await fetchLfOrdersPaginated(
       lfClient,
-      "fetch_orders",
-      { productId: lfProductId, dateFrom, dateTo },
-      runId,
-      "Fetch LightFunnels orders"
+      lfProductId,
+      dateFrom,
+      runId
     );
-    const lfOrders = Array.isArray(lfOrdersResult) ? lfOrdersResult : [];
 
-    // Step 6: Fetch tracking data
+    // Step 6: Fetch tracking data using get_shipment_summary in batches of 50
     await updateRunStatus(runId, "fetching_tracking", 5);
     const trackingClient = mcpClients.tracking();
-    const trackingResult = await callMcpTool(
+    const trackingNumbers = extractTrackingNumbers(codOrders, codLeads);
+    await appendLog(runId, `Found ${trackingNumbers.length} tracking numbers to look up`);
+    const trackingData = await fetchTrackingBatched(
       trackingClient,
-      "fetch_tracking",
-      { productName, dateFrom, dateTo },
-      runId,
-      "Fetch tracking data"
+      trackingNumbers,
+      runId
     );
-    const trackingData = Array.isArray(trackingResult) ? trackingResult : [];
 
     // Step 7: Build merged sheet using reconciliation engine
     await updateRunStatus(runId, "building_merged_sheet", 6);
@@ -209,7 +478,7 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
     const sheetClient = mcpClients.sheet();
     const sheetResult = await callMcpTool(
       sheetClient,
-      "build_sheet",
+      "sheets_write",
       {
         productName,
         outputFilename,
@@ -250,7 +519,7 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
       sheetUrl,
     });
 
-    // Step 9: Deploy dashboard
+    // Step 9: Deploy dashboard via deploy_dashboard on IMPORT BOND
     await updateRunStatus(runId, "deploying_dashboard", 8);
     await appendLog(runId, "Deploying dashboard...");
 

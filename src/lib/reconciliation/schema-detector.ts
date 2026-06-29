@@ -1,8 +1,13 @@
 /**
  * Dual schema detection for order data.
  *
- * Schema A: Contains "first_name" key (e.g., COD Network format)
- * Schema B: Contains "name_1" key (e.g., LightFunnels format)
+ * Schema A: Contains "first_name" key (e.g., COD Network format with first_name/last_name)
+ * Schema B: Contains "full_name" or "name_1" key (e.g., COD Network alt format or LightFunnels)
+ *
+ * Live data examples:
+ *   Schema A: { lead_id, first_name, last_name, phone, original_phone, status, ... }
+ *   Schema B: { lead_id, full_name, phone, original_phone, status, extra_fields, ... }
+ *   Schema B (LF): { name_1, phone_number, ... }
  */
 
 export type SchemaType = "A" | "B" | "unknown";
@@ -23,7 +28,7 @@ export function detectSchema(record: Record<string, unknown>): SchemaType {
     return "A";
   }
 
-  if (keys.includes("name_1")) {
+  if (keys.includes("full_name") || keys.includes("name_1")) {
     return "B";
   }
 
@@ -55,6 +60,8 @@ export function detectBatchSchema(
 
 /**
  * Extracts the customer name based on detected schema.
+ * Schema A: first_name + last_name
+ * Schema B: full_name (split on space) or name_1 + name_2
  */
 export function extractName(
   record: Record<string, unknown>,
@@ -68,7 +75,18 @@ export function extractName(
   }
 
   if (schema === "B") {
-    // Schema B uses name_1 (first) and name_2 (last)
+    // Schema B may use full_name (COD alt) or name_1/name_2 (LightFunnels)
+    if (record.full_name) {
+      const fullName = String(record.full_name).trim();
+      const spaceIdx = fullName.indexOf(" ");
+      if (spaceIdx > 0) {
+        return {
+          firstName: fullName.slice(0, spaceIdx),
+          lastName: fullName.slice(spaceIdx + 1),
+        };
+      }
+      return { firstName: fullName, lastName: "" };
+    }
     return {
       firstName: String(record.name_1 || ""),
       lastName: String(record.name_2 || ""),
@@ -80,17 +98,21 @@ export function extractName(
 
 /**
  * Extracts the phone number field based on detected schema.
+ * COD data may have both "phone" and "original_phone" - prefer original_phone
+ * as it contains the unformatted number.
  */
 export function extractPhone(
   record: Record<string, unknown>,
   schema: SchemaType
 ): string {
   if (schema === "A") {
-    return String(record.phone || record.telephone || "");
+    // Prefer original_phone if available (COD Network data)
+    return String(record.original_phone || record.phone || record.telephone || "");
   }
 
   if (schema === "B") {
-    return String(record.phone_number || record.phone || "");
+    // Schema B: prefer original_phone, then phone_number, then phone
+    return String(record.original_phone || record.phone_number || record.phone || "");
   }
 
   return "";

@@ -79,7 +79,7 @@ export type RowData = string[];
  * Assembles a single row from order data into the 45-column format.
  * @param record - The raw order record
  * @param defaultCc - Default country code for phone normalization
- * @param source - The data source identifier (e.g., "cod_network", "lightfunnels")
+ * @param source - The data source identifier (e.g., "cod_leads", "cod_orders", "lightfunnels")
  * @returns Array of exactly 45 string values
  */
 export function assembleRow(
@@ -96,27 +96,35 @@ export function assembleRow(
 
   const row: RowData = new Array(COLUMN_COUNT).fill("");
 
-  row[0] = String(record.order_id || record.id || "");                    // A: Order ID
-  row[1] = String(record.date || record.created_at || record.order_date || ""); // B: Date
+  // A: Order ID - use lead_id for COD data, order_id for others
+  row[0] = String(record.lead_id || record.order_id || record.id || "");
+  // B: Date - use created_at which is the common field across all sources
+  row[1] = String(record.created_at || record.date || record.order_date || "");
   row[2] = firstName;                                                      // C: First Name
   row[3] = lastName;                                                       // D: Last Name
   row[4] = rawPhone;                                                       // E: Phone
   row[5] = normalizedPhone;                                                // F: Normalized Phone
   row[6] = String(record.email || "");                                     // G: Email
-  row[7] = defaultCc;                                                      // H: Country Code
+  // H: Country Code - use country field from COD data or defaultCc
+  row[7] = String(record.country || defaultCc);
   row[8] = mappedCity;                                                     // I: City
   row[9] = address;                                                        // J: Address
   row[10] = region;                                                        // K: Region
   row[11] = String(record.postal_code || record.zip || "");               // L: Postal Code
   row[12] = String(record.product_name || record.product || "");          // M: Product Name
-  row[13] = String(record.sku || "");                                      // N: SKU
-  row[14] = String(record.quantity || record.qty || "1");                  // O: Quantity
+  // N: SKU - COD data uses sku_1 field
+  row[13] = String(record.sku_1 || record.sku || "");
+  // O: Quantity - COD data uses total_quantity
+  row[14] = String(record.total_quantity || record.quantity || record.qty || "1");
   row[15] = String(record.unit_price || record.price || "");              // P: Unit Price
-  row[16] = String(record.total_price || record.total || "");             // Q: Total Price
-  row[17] = String(record.currency || "SAR");                              // R: Currency
+  // Q: Total Price - common field across COD data
+  row[16] = String(record.total_price || record.total || "");
+  // R: Currency - COD data includes currency field
+  row[17] = String(record.currency || "SAR");
   row[18] = String(record.payment_method || "COD");                        // S: Payment Method
   row[19] = String(record.payment_status || "");                           // T: Payment Status
-  row[20] = String(record.order_status || record.status || "");           // U: Order Status
+  // U: Order Status - COD data uses "status" field (Confirmed, Expired, etc.)
+  row[20] = String(record.status || record.order_status || "");
   row[21] = String(record.shipping_method || "");                          // V: Shipping Method
   row[22] = String(record.tracking_number || record.tracking || "");      // W: Tracking Number
   row[23] = String(record.shipping_status || "");                          // X: Shipping Status
@@ -124,7 +132,7 @@ export function assembleRow(
   row[25] = String(record.delivered_date || "");                           // Z: Delivered Date
   row[26] = String(record.return_date || "");                              // AA: Return Date
   row[27] = String(record.return_reason || "");                            // AB: Return Reason
-  row[28] = String(record.cod_amount || record.total || "");              // AC: COD Amount
+  row[28] = String(record.cod_amount || record.total_price || record.total || ""); // AC: COD Amount
   row[29] = String(record.cod_collected || "");                            // AD: COD Collected
   row[30] = source;                                                        // AE: Source
   row[31] = String(record.campaign || "");                                 // AF: Campaign
