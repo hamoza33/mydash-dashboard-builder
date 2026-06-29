@@ -40,7 +40,14 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { productName, lfProductId, dateFrom, dateTo, defaultCc, outputFilename } = body;
+
+    // Accept both camelCase and snake_case field names
+    const productName = body.productName || body.product_name;
+    const lfProductId = body.lfProductId || body.lf_product_id;
+    const dateFrom = body.dateFrom || body.date_from;
+    const dateTo = body.dateTo || body.date_to;
+    const defaultCc = body.defaultCc || body.default_cc;
+    const outputFilename = body.outputFilename || body.output_filename;
 
     if (!productName || !lfProductId || !dateFrom || !dateTo) {
       return NextResponse.json(
