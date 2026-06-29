@@ -1,0 +1,46 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // SQLite for local development - switch to "postgresql" for production
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model DashboardRun {
+  id                           String    @id @default(cuid())
+  productName                  String
+  lfProductId                  String
+  dateFrom                     String
+  dateTo                       String
+  defaultCc                    String    @default("")
+  outputFilename               String    @default("")
+  status                       String    @default("pending") // pending, running, completed, failed
+  progress                     Int       @default(0)
+  currentStep                  String    @default("")
+  sheetUrl                     String?
+  dashboardUrl                 String?
+  dashboardSlug                String?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+  completedAt                  DateTime?
+  errorMessage                 String?
+  logs                         String    @default("[]") // JSON array stored as text
+  reconciliationPromptSnapshot String?
+  dashboardPromptSnapshot      String?
+}
+
+model PromptConfig {
+  id            String   @id @default(cuid())
+  docUrl        String
+  docTitle      String   @default("")
+  loadedAt      DateTime @default(now())
+  contentHash   String   @default("")
+  promptVersion Int      @default(1)
+  content       String   @default("")
+  type          String   // RECONCILIATION or DASHBOARD
+}

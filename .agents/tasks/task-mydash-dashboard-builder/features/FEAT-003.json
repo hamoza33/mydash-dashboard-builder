@@ -1,0 +1,43 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Implement the complete pipeline worker logic with MCP integration, reconciliation engine (phone normalization, dual schema detection, 45-column row assembly, city mapping, metrics), dashboard HTML builder, unit tests, seed script, and README.",
+  "status": "completed",
+  "steps": [
+    "Create src/lib/reconciliation/phone.ts - phone normalization utility (strip formatting/unicode, strip leading 00, leading 0 prepend country code, 9-digit prepend default CC, GCC prefixes: 966, 971, 965, 974, 968, 973)",
+    "Create src/lib/reconciliation/schema-detector.ts - Dual schema detection (Schema A has first_name key, Schema B has name_1 key)",
+    "Create src/lib/reconciliation/city-mapper.ts - City mapping (MADEENA->Madina, MAKKAH->Makkah, JEDDAH->Jeddah, GIZAN->Jazan, HOUFUF->Hofuf, SYSTEM->empty string)",
+    "Create src/lib/reconciliation/row-assembler.ts - Row assembly producing exactly 45 columns (A through AS)",
+    "Create src/lib/reconciliation/metrics.ts - Metrics calculations (delivery rate = delivered/shipped, return rate = returned/shipped, pending rate = pending/shipped)",
+    "Create src/lib/reconciliation/index.ts - Main reconciliation engine that ties all modules together",
+    "Create src/lib/dashboard-builder.ts - Dashboard HTML builder with design tokens",
+    "Update src/workers/pipeline.worker.ts - Integrate reconciliation engine and dashboard builder into pipeline steps",
+    "Create src/__tests__/phone.test.ts - Unit tests for phone normalization",
+    "Create src/__tests__/schema-detector.test.ts - Unit tests for schema detection",
+    "Create src/__tests__/city-mapper.test.ts - Unit tests for city mapping",
+    "Create src/__tests__/row-assembler.test.ts - Unit tests for row assembly",
+    "Create src/__tests__/metrics.test.ts - Unit tests for metrics calculations",
+    "Create src/__tests__/reconciliation.test.ts - Integration tests for reconciliation engine",
+    "Add Jest configuration to package.json (ts-jest preset, TypeScript test compilation)",
+    "Create prisma/seed.ts - Seed script for development data",
+    "Create README.md - Comprehensive project documentation"
+  ],
+  "acceptance_criteria": [
+    "Phone normalization correctly strips formatting, handles leading 00, leading 0, 9-digit numbers with GCC prefixes",
+    "Schema detector correctly identifies Schema A (first_name) vs Schema B (name_1)",
+    "City mapper correctly maps all specified city names",
+    "Row assembler produces exactly 45 columns",
+    "Metrics correctly calculate delivery, return, and pending rates",
+    "Dashboard builder produces valid HTML with proper design tokens",
+    "All unit tests pass (npm test)",
+    "npm run build completes successfully",
+    "Seed script can be executed",
+    "README documents the project comprehensively"
+  ],
+  "verification": [
+    "Run npm test and confirm all tests pass",
+    "Run npm run build and confirm it exits with code 0"
+  ],
+  "blocked_reason": null,
+  "findings": "All 69 tests pass across 6 test suites. Build succeeds with exit code 0. Jest 30 with ts-jest 29 works correctly with the bundler moduleResolution in tsconfig.json. The reconciliation engine is fully modular with independent testable units. Pipeline worker now uses the proper step names matching the DashboardRun status values from the schema. Redis ECONNREFUSED warnings during build are expected (non-blocking) since Redis is not running locally."
+}

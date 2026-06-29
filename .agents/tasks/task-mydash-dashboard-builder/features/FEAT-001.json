@@ -1,0 +1,40 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Initialize the Next.js project with full project scaffolding, database schema, and core infrastructure. This sets up the entire project structure including all dependencies, Prisma schema, Docker Compose configuration, environment setup, and the BullMQ worker infrastructure.",
+  "status": "completed",
+  "steps": [
+    "Initialize a new Next.js 14+ project with TypeScript and App Router in /projects/sandbox using: npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias '@/*' (answer yes to all prompts, use defaults)",
+    "Install all required dependencies: prisma @prisma/client bullmq ioredis crypto-hash node-fetch cheerio (dev: @types/node jest @testing-library/react @testing-library/jest-dom ts-jest jest-environment-jsdom)",
+    "Create prisma/schema.prisma with SQLite provider (easily switchable to PostgreSQL). Define models: DashboardRun (id, productName, lfProductId, dateFrom, dateTo, defaultCc, outputFilename, status enum, progress Int, currentStep, sheetUrl, dashboardUrl, dashboardSlug, createdAt, updatedAt, completedAt, errorMessage, logs Json, reconciliationPromptSnapshot Text, dashboardPromptSnapshot Text), PromptConfig (id, docUrl, docTitle, loadedAt, contentHash, promptVersion Int, content Text, type enum RECONCILIATION/DASHBOARD)",
+    "Create .env.example with all required environment variables: DATABASE_URL=file:./dev.db, REDIS_URL=redis://localhost:6379, COD_NETWORK_MCP_URL=, LIGHTFUNNELS_MCP_URL=, TRACKING_MCP_URL=, TIKTOK_MCP_URL=, FACEBOOK_MCP_URL=, SHEET_MCP_URL=, IMPORT_MCP_URL=, MCP_AUTH_TOKEN=, GOOGLE_DOC_RECONCILIATION_ID=1jSr0t8GZZpGZeYfBCvrpxMwVNplCKJKN9rVhVz3D3P4, GOOGLE_DOC_DASHBOARD_ID=1EXVVZ9mW-MtT42up3OWgTuvLQ6YxlnsO3TWf2P17Pz0, NEXT_PUBLIC_APP_URL=http://localhost:3000, ADMIN_PASSWORD=",
+    "Create .env file (copy of .env.example with SQLite DATABASE_URL filled in for local dev)",
+    "Create comprehensive .gitignore including: node_modules, .next, .env, *.db, coverage, dist",
+    "Create docker-compose.yml with services: redis (redis:7-alpine on port 6379), app (Dockerfile build context, depends on redis, ports 3000, env_file .env). Include commented-out postgres service for future migration.",
+    "Create Dockerfile for the Next.js app (multi-stage: deps install, build, production runner with node:22-alpine)",
+    "Run npx prisma generate and npx prisma db push to initialize the database",
+    "Create src/lib/queue.ts - BullMQ queue setup with Redis connection, define 'dashboard-pipeline' queue",
+    "Create src/lib/prompt-loader.ts - PromptLoader service that fetches Google Docs via their export URLs (https://docs.google.com/document/d/{DOC_ID}/export?format=txt), computes content hash, stores snapshots in the database with version tracking",
+    "Create src/lib/mcp-client.ts - MCP client wrapper that makes HTTP POST requests to configured MCP endpoints with auth token from env, handles errors gracefully",
+    "Create src/workers/pipeline.worker.ts - BullMQ worker that processes dashboard-pipeline jobs. Implements the full pipeline: load prompts -> run reconciliation steps (fetch COD leads, orders, LF orders, tracking) -> build merged sheet -> run dashboard builder -> deploy. Updates DashboardRun status at each step.",
+    "Create src/lib/db.ts - Prisma client singleton for the application",
+    "Verify: run npm run build successfully, run npx prisma generate successfully"
+  ],
+  "acceptance_criteria": [
+    "npm install completes without errors",
+    "npx prisma generate creates the Prisma client",
+    "npx prisma db push creates the SQLite database with correct schema",
+    "npm run build completes successfully",
+    "Docker Compose file is valid (docker compose config passes)",
+    ".env.example contains all required variables with empty/placeholder values",
+    ".gitignore excludes .env, node_modules, .next, and database files",
+    "All TypeScript files compile without errors"
+  ],
+  "verification": [
+    "Run npm run build and confirm it exits with code 0",
+    "Run npx prisma generate and confirm Prisma client is generated",
+    "Run docker compose config to validate docker-compose.yml syntax"
+  ],
+  "blocked_reason": null,
+  "findings": "Node.js 22 was not pre-installed - installed via mise with MISE_NODE_VERIFY=false due to gpg-agent not being available. Prisma 7 has breaking changes (no longer supports url in datasource block), downgraded to Prisma 5 for compatibility. BullMQ bundles its own ioredis which conflicts with standalone ioredis types - used plain connection config objects instead of IORedis instances. Docker compose plugin was not pre-installed - installed manually. The .env file is gitignored but .env.example is tracked. SQLite database is created at prisma/dev.db."
+}

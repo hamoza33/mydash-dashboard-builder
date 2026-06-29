@@ -1,0 +1,43 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Implement all backend API routes and the complete frontend UI including pages for runs list, new run form, run detail with logs, dashboard viewer, and admin prompts management. Includes dark-themed layout with navigation, StatusBadge, RunCard, and other UI components.",
+  "status": "completed",
+  "steps": [
+    "Create API routes: src/app/api/runs/route.ts (GET list, POST create), src/app/api/runs/[id]/route.ts (GET detail, DELETE), src/app/api/runs/[id]/rerun/route.ts (POST), src/app/api/runs/[id]/logs/route.ts (GET), src/app/api/runs/[id]/status/route.ts (GET)",
+    "Create API routes: src/app/api/prompts/route.ts (GET list), src/app/api/prompts/refresh/route.ts (POST), src/app/api/prompts/[id]/snapshot/route.ts (GET)",
+    "Create API routes: src/app/api/dashboards/route.ts (GET list), src/app/api/dashboards/[slug]/route.ts (GET)",
+    "Create UI components: src/components/ui/StatusBadge.tsx, RunCard.tsx, VariablesForm.tsx, RunProgress.tsx, LogViewer.tsx, Navigation.tsx",
+    "Update src/app/globals.css with dark theme design tokens",
+    "Update src/app/layout.tsx with Navigation and dark theme",
+    "Replace src/app/page.tsx with runs list page",
+    "Create src/app/new/page.tsx - new run form page",
+    "Create src/app/runs/[id]/page.tsx - run detail page with progress and logs",
+    "Create src/app/dashboard/[slug]/page.tsx - dashboard viewer page",
+    "Create src/app/admin/prompts/page.tsx - prompts admin page"
+  ],
+  "acceptance_criteria": [
+    "npm run build completes successfully",
+    "All API routes return proper JSON responses with correct HTTP status codes",
+    "POST /api/runs creates a DashboardRun and enqueues a BullMQ job",
+    "GET /api/runs returns paginated list of runs ordered by createdAt desc",
+    "GET /api/runs/[id] returns full run details",
+    "GET /api/runs/[id]/logs returns parsed logs array",
+    "GET /api/runs/[id]/status returns current status and progress",
+    "POST /api/runs/[id]/rerun creates a new run with same parameters",
+    "DELETE /api/runs/[id] deletes a run",
+    "GET /api/prompts returns all prompt configs",
+    "POST /api/prompts/refresh triggers prompt reload from Google Docs",
+    "GET /api/prompts/[id]/snapshot returns specific prompt content",
+    "GET /api/dashboards returns list of completed dashboards",
+    "GET /api/dashboards/[slug] returns dashboard details",
+    "Frontend pages render without errors",
+    "Dark theme applied consistently with design tokens from briefing",
+    "Navigation component present on all pages"
+  ],
+  "verification": [
+    "Run npm run build and confirm it exits with code 0"
+  ],
+  "blocked_reason": null,
+  "findings": "Build succeeds (exit code 0). Redis ECONNREFUSED warnings during build are expected since Redis is not running - these are non-blocking and come from BullMQ queue initialization at import time. All API routes and pages compile correctly with Next.js 16 App Router conventions. Used params: Promise<{id: string}> pattern for dynamic route params as required by Next.js 16."
+}
