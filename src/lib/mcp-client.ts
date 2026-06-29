@@ -32,11 +32,79 @@ export class McpClient {
   private baseUrl: string;
   private authToken: string;
   private requestId: number;
+  private initialized: boolean;
 
   constructor(baseUrl: string, authToken?: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.authToken = authToken || process.env.MCP_AUTH_TOKEN || "";
     this.requestId = 0;
+    this.initialized = false;
+  }
+
+  /**
+   * Sends the MCP initialize handshake if not already done.
+   */
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+
+    this.requestId++;
+    try {
+      const response = await fetch(this.baseUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json, text/event-stream",
+          ...(this.authToken
+            ? { Authorization: `Bearer ${this.authToken}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: this.requestId,
+          method: "initialize",
+          params: {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: {
+              name: "mydash-dashboard-builder",
+              version: "1.0.0",
+            },
+          },
+        }),
+      });
+
+      if (response.ok) {
+        // Read the response to complete the handshake
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("text/event-stream")) {
+          await response.text();
+        } else {
+          await response.json();
+        }
+
+        // Send initialized notification
+        this.requestId++;
+        await fetch(this.baseUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            ...(this.authToken
+              ? { Authorization: `Bearer ${this.authToken}` }
+              : {}),
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "notifications/initialized",
+          }),
+        });
+      }
+    } catch {
+      // Initialization failed but we can still try tool calls
+      // Some servers don't require initialization
+    }
+
+    this.initialized = true;
   }
 
   /**
@@ -79,6 +147,7 @@ export class McpClient {
    *   Body: {"jsonrpc":"2.0","id":N,"method":"tools/call","params":{"name":"tool_name","arguments":{...}}}
    */
   async callTool(toolCall: McpToolCall): Promise<McpResponse> {
+    await this.ensureInitialized();
     this.requestId++;
 
     try {
