@@ -1,6 +1,7 @@
 /**
  * MCP Client wrapper that makes JSON-RPC 2.0 HTTP POST requests to configured
  * MCP endpoints with Bearer token auth. Supports both JSON and SSE responses.
+ * Implements MCP Streamable HTTP transport with session management.
  */
 
 export interface McpToolCall {
@@ -33,16 +34,36 @@ export class McpClient {
   private authToken: string;
   private requestId: number;
   private initialized: boolean;
+  private sessionId: string | null;
 
   constructor(baseUrl: string, authToken?: string) {
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.authToken = authToken || process.env.MCP_AUTH_TOKEN || "";
     this.requestId = 0;
     this.initialized = false;
+    this.sessionId = null;
+  }
+
+  /**
+   * Builds the common headers for MCP requests.
+   */
+  private getHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Accept": "application/json, text/event-stream",
+    };
+    if (this.authToken) {
+      headers["Authorization"] = `Bearer ${this.authToken}`;
+    }
+    if (this.sessionId) {
+      headers["Mcp-Session-Id"] = this.sessionId;
+    }
+    return headers;
   }
 
   /**
    * Sends the MCP initialize handshake if not already done.
+   * Captures the session ID from the response for subsequent requests.
    */
   private async ensureInitialized(): Promise<void> {
     if (this.initialized) return;
@@ -51,13 +72,7 @@ export class McpClient {
     try {
       const response = await fetch(this.baseUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json, text/event-stream",
-          ...(this.authToken
-            ? { Authorization: `Bearer ${this.authToken}` }
-            : {}),
-        },
+        headers: this.getHeaders(),
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: this.requestId,
@@ -74,7 +89,13 @@ export class McpClient {
       });
 
       if (response.ok) {
-        // Read the response to complete the handshake
+        // Capture session ID from response header
+        const mcpSessionId = response.headers.get("mcp-session-id");
+        if (mcpSessionId) {
+          this.sessionId = mcpSessionId;
+        }
+
+        // Read the response body to complete the handshake
         const contentType = response.headers.get("content-type") || "";
         if (contentType.includes("text/event-stream")) {
           await response.text();
@@ -82,17 +103,10 @@ export class McpClient {
           await response.json();
         }
 
-        // Send initialized notification
-        this.requestId++;
+        // Send initialized notification (with session ID if we have one)
         await fetch(this.baseUrl, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-            ...(this.authToken
-              ? { Authorization: `Bearer ${this.authToken}` }
-              : {}),
-          },
+          headers: this.getHeaders(),
           body: JSON.stringify({
             jsonrpc: "2.0",
             method: "notifications/initialized",
@@ -144,6 +158,7 @@ export class McpClient {
    * POST to the MCP endpoint with:
    *   Authorization: Bearer {token}
    *   Accept: application/json, text/event-stream
+   *   Mcp-Session-Id: {session_id} (if established)
    *   Body: {"jsonrpc":"2.0","id":N,"method":"tools/call","params":{"name":"tool_name","arguments":{...}}}
    */
   async callTool(toolCall: McpToolCall): Promise<McpResponse> {
@@ -153,13 +168,7 @@ export class McpClient {
     try {
       const response = await fetch(this.baseUrl, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json, text/event-stream",
-          ...(this.authToken
-            ? { Authorization: `Bearer ${this.authToken}` }
-            : {}),
-        },
+        headers: this.getHeaders(),
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: this.requestId,
@@ -170,6 +179,12 @@ export class McpClient {
           },
         }),
       });
+
+      // If we get a session ID in response, update it
+      const mcpSessionId = response.headers.get("mcp-session-id");
+      if (mcpSessionId) {
+        this.sessionId = mcpSessionId;
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
