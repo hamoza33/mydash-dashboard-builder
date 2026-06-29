@@ -2,7 +2,7 @@
   "id": "FEAT-001",
   "type": "feat",
   "description": "Rewrite src/lib/dashboard-builder.ts to produce a reference-matching HTML dashboard with gzip+base64 encoded data payload, full CSS design system, charts, filters, tables, modals, and all client-side JS. Also update the pipeline worker to pass raw rows to the builder.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Step 1: Rewrite src/lib/dashboard-builder.ts with a new interface that accepts: productName, dateFrom, dateTo, reconciliationRows (RowData[]), sheetUrl, and dashboardSlug. The function must: (a) Transform the 45-column RowData[] into a JSON array of objects with 34 fields matching the reference format: lead_id, lead_status, lead_date, lead_name, phone, city, country, lead_qty, lead_price, currency, sku, order_id, order_status, order_total, order_qty, order_date, tracking, track_status, carrier, norm_status, latest_status, status_detail, latest_update, undelivery, origin_city, dest_city, lf_order, lf_date, lf_total, lf_fin_status, funnel_url, utm_source, utm_medium, utm_campaign. (b) Gzip compress the JSON array, then base64 encode it as a PAY constant. (c) Generate the full HTML matching the reference exactly.",
     "Step 2: The HTML must include: Google Fonts (DM Mono), CSS design system with variables --bg:#07080d, --s1:#0f1018, --s2:#161820, --s3:#1e2030, --border:#272a3a, --border2:#343748, --green:#4ade80, --red:#f87171, --amber:#fbbf24, --blue:#60a5fa, --violet:#a78bfa, --cyan:#22d3ee, --text:#e2e4f0, --text2:#9099b8, --text3:#555d7a. Body scanline effect. All CSS classes: .top1, .brand, .badge, .stats, .stat, .tabs, .tab, .kpis, .k, .filters, .card, .grid, .g2, .g3, .g21, .row, .name, .bar, .num, .funnel, .trap, .matrix, .tbl, .score, .pill, .leader, .daily, .day, .seg, .leg, .dot, .vbars, .vb, .vbl, .don, .pg, .modal, .box, .mh, .x, .kv.",
@@ -30,5 +30,5 @@
     "Run git push to GitHub and rebuild on VPS"
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "All type checks pass (non-test files). All 69 tests pass. Output HTML is ~35KB with 431 test rows (well under 60KB). Pre-existing tsc errors exist only in __tests__/*.test.ts files due to missing @types/jest in tsconfig include scope. The worker was restructured to generate the slug before calling buildDashboardHtml. The CityPerformanceEntry interface and extractCityPerformance function were removed from the worker since city performance is now computed client-side from the raw data."
 }
