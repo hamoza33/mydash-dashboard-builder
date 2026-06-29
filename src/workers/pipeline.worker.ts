@@ -368,6 +368,84 @@ function extractTrackingNumbers(
 }
 
 /**
+ * Generates a URL-safe slug from product name and date.
+ * Pattern: ^[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?$
+ */
+function generateSlug(productName: string, date: string): string {
+  const namePart = productName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")   // Replace non-alphanumeric chars with hyphens
+    .replace(/^-+|-+$/g, "")        // Trim leading/trailing hyphens
+    .slice(0, 40);                   // Limit length to leave room for date + suffix
+
+  const slug = `${namePart}-${date}`;
+
+  // Ensure slug matches the required pattern
+  return slug
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/--+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+/**
+ * City performance data structure for dashboard rendering.
+ */
+export interface CityPerformanceEntry {
+  city: string;
+  total: number;
+  confirmed: number;
+  shipped: number;
+  delivered: number;
+  returned: number;
+}
+
+/**
+ * Extracts city performance data from reconciled rows.
+ * Uses Order City (column I, index 8) only.
+ */
+function extractCityPerformance(rows: string[][]): CityPerformanceEntry[] {
+  const cityMap = new Map<string, CityPerformanceEntry>();
+
+  for (const row of rows) {
+    const city = (row[8] || "Unknown").trim() || "Unknown";
+    const orderStatus = (row[20] || "").toLowerCase(); // Column U: Order Status
+    const shippingStatus = (row[23] || "").toLowerCase(); // Column X: Shipping Status
+
+    if (!cityMap.has(city)) {
+      cityMap.set(city, { city, total: 0, confirmed: 0, shipped: 0, delivered: 0, returned: 0 });
+    }
+    const entry = cityMap.get(city)!;
+    entry.total++;
+
+    if (orderStatus === "confirmed" || orderStatus.includes("confirm")) {
+      entry.confirmed++;
+    }
+
+    if (shippingStatus) {
+      if (shippingStatus === "delivered" || shippingStatus.includes("delivered") || shippingStatus === "dlv") {
+        entry.delivered++;
+        entry.shipped++;
+      } else if (shippingStatus === "returned" || shippingStatus.includes("return") || shippingStatus === "rto") {
+        entry.returned++;
+        entry.shipped++;
+      } else if (
+        shippingStatus === "shipped" || shippingStatus === "in_transit" ||
+        shippingStatus === "transit" || shippingStatus === "pending" ||
+        shippingStatus.includes("transit")
+      ) {
+        entry.shipped++;
+      }
+    }
+  }
+
+  // Sort by total orders descending and return top 20 cities
+  return Array.from(cityMap.values())
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 20);
+}
+
+/**
  * Main pipeline processor.
  * Orchestrates the full dashboard pipeline from prompt loading through deployment.
  */
@@ -474,39 +552,108 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
       `Reconciliation complete: ${reconciliationResult.totalRecords} records, ${reconciliationResult.reconciledCount} reconciled, ${reconciliationResult.duplicatesFound} duplicates`
     );
 
-    // Upload sheet via MCP
+    // Upload sheet via SHEET BOND MCP: sheets_create + sheets_batch_update_multi
     const sheetClient = mcpClients.sheet();
-    const sheetResult = await callMcpTool(
-      sheetClient,
-      "sheets_write",
-      {
-        productName,
-        outputFilename,
-        dateFrom,
-        dateTo,
-        headers: reconciliationResult.headers,
-        rows: reconciliationResult.rows,
-      },
-      runId,
-      "Build merged sheet"
-    );
-
     let sheetUrl: string | undefined;
-    if (
-      sheetResult &&
-      typeof sheetResult === "object" &&
-      "url" in (sheetResult as Record<string, unknown>)
-    ) {
-      sheetUrl = (sheetResult as Record<string, unknown>).url as string;
-      await prisma.dashboardRun.update({
-        where: { id: runId },
-        data: { sheetUrl },
-      });
+
+    if (sheetClient) {
+      const today = new Date().toISOString().split("T")[0];
+      const sheetTitle = `COD_LF_Full_Merged - ${productName} - ${today}`;
+
+      // Step 1: Create the spreadsheet
+      const createResult = await callMcpTool(
+        sheetClient,
+        "sheets_create",
+        { title: sheetTitle },
+        runId,
+        "Create spreadsheet"
+      );
+
+      let spreadsheetId: string | undefined;
+      if (createResult && typeof createResult === "object") {
+        const res = createResult as Record<string, unknown>;
+        spreadsheetId = res.spreadsheetId as string | undefined;
+        if (spreadsheetId) {
+          sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+        } else if (res.url) {
+          sheetUrl = res.url as string;
+          // Extract spreadsheet ID from URL if available
+          const match = (res.url as string).match(/\/d\/([^/]+)/);
+          if (match) spreadsheetId = match[1];
+        }
+      }
+
+      if (spreadsheetId) {
+        // Step 2: Write all data (headers + rows) using sheets_batch_update_multi
+        const allValues: string[][] = [
+          reconciliationResult.headers,
+          ...reconciliationResult.rows,
+        ];
+
+        // Split into batches of 5000 rows to avoid payload limits
+        const BATCH_SIZE = 5000;
+        const totalRows = allValues.length;
+
+        if (totalRows <= BATCH_SIZE) {
+          await callMcpTool(
+            sheetClient,
+            "sheets_batch_update_multi",
+            {
+              spreadsheet_id: spreadsheetId,
+              data: [
+                {
+                  range: `Sheet1!A1:AS${totalRows}`,
+                  values: allValues,
+                },
+              ],
+              value_input_option: "RAW",
+            },
+            runId,
+            `Write ${totalRows} rows to sheet`
+          );
+        } else {
+          // Write in chunks
+          const chunks: { range: string; values: string[][] }[] = [];
+          for (let i = 0; i < totalRows; i += BATCH_SIZE) {
+            const chunk = allValues.slice(i, i + BATCH_SIZE);
+            chunks.push({
+              range: `Sheet1!A${i + 1}:AS${i + chunk.length}`,
+              values: chunk,
+            });
+          }
+          await callMcpTool(
+            sheetClient,
+            "sheets_batch_update_multi",
+            {
+              spreadsheet_id: spreadsheetId,
+              data: chunks,
+              value_input_option: "RAW",
+            },
+            runId,
+            `Write ${totalRows} rows to sheet in ${chunks.length} chunks`
+          );
+        }
+
+        await appendLog(runId, `Sheet created: ${sheetUrl}`);
+      }
+
+      // Update run with sheet URL
+      if (sheetUrl) {
+        await prisma.dashboardRun.update({
+          where: { id: runId },
+          data: { sheetUrl },
+        });
+      }
+    } else {
+      await appendLog(runId, "SKIP: Sheet creation - SHEET_MCP_URL not configured");
     }
 
     // Step 8: Run dashboard prompt / build dashboard HTML
     await updateRunStatus(runId, "running_dashboard_prompt", 7);
     await appendLog(runId, "Building dashboard HTML...");
+
+    // Extract city performance data from reconciled rows (using Order City, column I index 8)
+    const cityPerformance = extractCityPerformance(reconciliationResult.rows);
 
     const dashboardHtml = buildDashboardHtml({
       productName,
@@ -517,6 +664,7 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
       reconciledCount: reconciliationResult.reconciledCount,
       duplicatesFound: reconciliationResult.duplicatesFound,
       sheetUrl,
+      cityPerformance,
     });
 
     // Step 9: Deploy dashboard via deploy_dashboard on IMPORT BOND
@@ -524,26 +672,74 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
     await appendLog(runId, "Deploying dashboard...");
 
     const importClient = mcpClients.import();
-    const deployResult = await callMcpTool(
-      importClient,
-      "deploy_dashboard",
-      {
-        productName,
-        html: dashboardHtml,
-        dateFrom,
-        dateTo,
-      },
-      runId,
-      "Deploy dashboard"
-    );
-
     let dashboardUrl: string | undefined;
     let dashboardSlug: string | undefined;
 
-    if (deployResult && typeof deployResult === "object") {
-      const result = deployResult as Record<string, unknown>;
-      dashboardUrl = result.url as string | undefined;
-      dashboardSlug = result.slug as string | undefined;
+    if (importClient) {
+      const today = new Date().toISOString().split("T")[0];
+
+      // Generate slug: lowercase, hyphenated, URL-safe from product name + date
+      let baseSlug = generateSlug(productName, today);
+
+      // Check if slug exists by listing dashboards
+      let slug = baseSlug;
+      try {
+        const listResult = await callMcpTool(
+          importClient,
+          "list_dashboards",
+          {},
+          runId,
+          "Check existing dashboards"
+        );
+
+        if (listResult && Array.isArray(listResult)) {
+          const existingSlugs = new Set(
+            (listResult as Record<string, unknown>[]).map((d) => d.slug as string)
+          );
+          let suffix = 1;
+          while (existingSlugs.has(slug)) {
+            suffix++;
+            slug = `${baseSlug}-${suffix}`;
+          }
+          if (slug !== baseSlug) {
+            await appendLog(runId, `Slug "${baseSlug}" taken, using "${slug}"`);
+          }
+        }
+      } catch {
+        // If list fails, proceed with original slug
+        await appendLog(runId, "WARN: Could not check existing dashboards, proceeding with generated slug");
+      }
+
+      // Deploy with correct schema
+      const dashboardName = `${productName} \u2014 ${today}`;
+      const deployResult = await callMcpTool(
+        importClient,
+        "deploy_dashboard",
+        {
+          slug,
+          name: dashboardName,
+          html: dashboardHtml,
+          sheetUrl: sheetUrl || undefined,
+          category: "Products",
+        },
+        runId,
+        "Deploy dashboard"
+      );
+
+      dashboardSlug = slug;
+      dashboardUrl = `https://dash.shopinzo.bond/${slug}`;
+
+      if (deployResult && typeof deployResult === "object") {
+        const result = deployResult as Record<string, unknown>;
+        // Use URL from response if available
+        if (result.url) {
+          dashboardUrl = result.url as string;
+        }
+      }
+
+      await appendLog(runId, `Dashboard deployed: ${dashboardUrl}`);
+    } else {
+      await appendLog(runId, "SKIP: Dashboard deployment - IMPORT_MCP_URL not configured");
     }
 
     // Mark as completed

@@ -1,8 +1,9 @@
 /**
  * Dashboard HTML builder.
  *
- * Generates a standalone HTML dashboard with embedded styling
- * using design tokens from the specification.
+ * Generates a standalone HTML dashboard with embedded styling,
+ * city performance charts, key metrics, and live data fetching support.
+ * Must be under 60KB.
  */
 
 import type { MetricsResult } from "./reconciliation/metrics";
@@ -36,6 +37,15 @@ function sanitizeUrl(url: string): string | null {
   }
 }
 
+export interface CityPerformanceEntry {
+  city: string;
+  total: number;
+  confirmed: number;
+  shipped: number;
+  delivered: number;
+  returned: number;
+}
+
 export interface DashboardConfig {
   productName: string;
   dateFrom: string;
@@ -45,73 +55,13 @@ export interface DashboardConfig {
   reconciledCount: number;
   duplicatesFound: number;
   sheetUrl?: string;
-}
-
-/**
- * Design tokens for the dashboard theme.
- */
-const DESIGN_TOKENS = {
-  colors: {
-    background: "#0f172a",
-    surface: "#1e293b",
-    surfaceHover: "#334155",
-    primary: "#3b82f6",
-    primaryHover: "#2563eb",
-    success: "#10b981",
-    warning: "#f59e0b",
-    error: "#ef4444",
-    textPrimary: "#f8fafc",
-    textSecondary: "#94a3b8",
-    textMuted: "#64748b",
-    border: "#334155",
-    cardBg: "#1e293b",
-  },
-  fonts: {
-    sans: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    mono: "'JetBrains Mono', 'Fira Code', monospace",
-  },
-  spacing: {
-    xs: "4px",
-    sm: "8px",
-    md: "16px",
-    lg: "24px",
-    xl: "32px",
-    xxl: "48px",
-  },
-  borderRadius: {
-    sm: "6px",
-    md: "8px",
-    lg: "12px",
-    xl: "16px",
-  },
-};
-
-/**
- * Generates a metric card HTML block.
- */
-function metricCard(label: string, value: string, color: string): string {
-  return `
-    <div class="metric-card">
-      <div class="metric-value" style="color: ${color};">${value}</div>
-      <div class="metric-label">${label}</div>
-    </div>
-  `;
-}
-
-/**
- * Generates a stat row for the summary section.
- */
-function statRow(label: string, value: string | number): string {
-  return `
-    <div class="stat-row">
-      <span class="stat-label">${label}</span>
-      <span class="stat-value">${value}</span>
-    </div>
-  `;
+  cityPerformance?: CityPerformanceEntry[];
 }
 
 /**
  * Builds a complete standalone HTML dashboard page.
+ * Includes key metrics, city performance table, and live data fetching.
+ * Self-contained with inline CSS/JS, under 60KB.
  */
 export function buildDashboardHtml(config: DashboardConfig): string {
   const {
@@ -123,200 +73,189 @@ export function buildDashboardHtml(config: DashboardConfig): string {
     reconciledCount,
     duplicatesFound,
     sheetUrl,
+    cityPerformance = [],
   } = config;
 
-  const t = DESIGN_TOKENS;
+  const safeSheetUrl = sheetUrl ? sanitizeUrl(sheetUrl) : null;
+
+  // Build city rows HTML
+  const cityRowsHtml = cityPerformance
+    .map((c) => {
+      const deliveryRate = c.shipped > 0 ? ((c.delivered / c.shipped) * 100).toFixed(1) : "0.0";
+      const returnRate = c.shipped > 0 ? ((c.returned / c.shipped) * 100).toFixed(1) : "0.0";
+      return `<tr>
+        <td>${escapeHtml(c.city)}</td>
+        <td>${c.total}</td>
+        <td>${c.confirmed}</td>
+        <td>${c.shipped}</td>
+        <td>${c.delivered}</td>
+        <td>${c.returned}</td>
+        <td>${deliveryRate}%</td>
+        <td>${returnRate}%</td>
+      </tr>`;
+    })
+    .join("\n");
+
+  // Build city chart bars (horizontal bar chart using CSS)
+  const maxCityTotal = cityPerformance.length > 0 ? cityPerformance[0].total : 1;
+  const cityBarsHtml = cityPerformance
+    .slice(0, 10)
+    .map((c) => {
+      const pct = Math.round((c.total / maxCityTotal) * 100);
+      return `<div class="bar-row">
+        <span class="bar-label">${escapeHtml(c.city)}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <span class="bar-value">${c.total}</span>
+      </div>`;
+    })
+    .join("\n");
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(productName)} Dashboard - ${escapeHtml(dateFrom)} to ${escapeHtml(dateTo)}</title>
-  <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
-    body {
-      font-family: ${t.fonts.sans};
-      background-color: ${t.colors.background};
-      color: ${t.colors.textPrimary};
-      line-height: 1.6;
-      min-height: 100vh;
-      padding: ${t.spacing.xl};
-    }
-
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
-    }
-
-    .header {
-      margin-bottom: ${t.spacing.xxl};
-      text-align: center;
-    }
-
-    .header h1 {
-      font-size: 2rem;
-      font-weight: 700;
-      margin-bottom: ${t.spacing.sm};
-    }
-
-    .header .subtitle {
-      color: ${t.colors.textSecondary};
-      font-size: 1rem;
-    }
-
-    .metrics-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: ${t.spacing.md};
-      margin-bottom: ${t.spacing.xxl};
-    }
-
-    .metric-card {
-      background: ${t.colors.cardBg};
-      border: 1px solid ${t.colors.border};
-      border-radius: ${t.borderRadius.lg};
-      padding: ${t.spacing.lg};
-      text-align: center;
-      transition: background-color 0.2s;
-    }
-
-    .metric-card:hover {
-      background: ${t.colors.surfaceHover};
-    }
-
-    .metric-value {
-      font-size: 2rem;
-      font-weight: 700;
-      font-family: ${t.fonts.mono};
-      margin-bottom: ${t.spacing.xs};
-    }
-
-    .metric-label {
-      color: ${t.colors.textSecondary};
-      font-size: 0.875rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .section {
-      background: ${t.colors.cardBg};
-      border: 1px solid ${t.colors.border};
-      border-radius: ${t.borderRadius.lg};
-      padding: ${t.spacing.lg};
-      margin-bottom: ${t.spacing.lg};
-    }
-
-    .section h2 {
-      font-size: 1.25rem;
-      font-weight: 600;
-      margin-bottom: ${t.spacing.md};
-      color: ${t.colors.textPrimary};
-    }
-
-    .stat-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: ${t.spacing.sm} 0;
-      border-bottom: 1px solid ${t.colors.border};
-    }
-
-    .stat-row:last-child {
-      border-bottom: none;
-    }
-
-    .stat-label {
-      color: ${t.colors.textSecondary};
-    }
-
-    .stat-value {
-      font-weight: 600;
-      font-family: ${t.fonts.mono};
-    }
-
-    .footer {
-      text-align: center;
-      margin-top: ${t.spacing.xxl};
-      color: ${t.colors.textMuted};
-      font-size: 0.875rem;
-    }
-
-    .sheet-link {
-      display: inline-block;
-      margin-top: ${t.spacing.md};
-      padding: ${t.spacing.sm} ${t.spacing.md};
-      background: ${t.colors.primary};
-      color: ${t.colors.textPrimary};
-      border-radius: ${t.borderRadius.md};
-      text-decoration: none;
-      font-weight: 500;
-      transition: background-color 0.2s;
-    }
-
-    .sheet-link:hover {
-      background: ${t.colors.primaryHover};
-    }
-
-    @media (max-width: 768px) {
-      body { padding: ${t.spacing.md}; }
-      .header h1 { font-size: 1.5rem; }
-      .metric-value { font-size: 1.5rem; }
-      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${escapeHtml(productName)} - Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#f8fafc;line-height:1.5;min-height:100vh;padding:24px}
+.container{max-width:1200px;margin:0 auto}
+.header{text-align:center;margin-bottom:32px}
+.header h1{font-size:1.75rem;font-weight:700;margin-bottom:4px}
+.header .sub{color:#94a3b8;font-size:.9rem}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:28px}
+.m-card{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;text-align:center}
+.m-card .val{font-size:1.75rem;font-weight:700;font-family:'JetBrains Mono',monospace}
+.m-card .lbl{color:#94a3b8;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.section{background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;margin-bottom:16px}
+.section h2{font-size:1.1rem;font-weight:600;margin-bottom:12px}
+.stat-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #334155}
+.stat-row:last-child{border-bottom:none}
+.stat-row .sl{color:#94a3b8}
+.stat-row .sv{font-weight:600;font-family:'JetBrains Mono',monospace}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #334155}
+th{color:#94a3b8;font-weight:500;text-transform:uppercase;font-size:.7rem;letter-spacing:.04em}
+td{color:#f8fafc}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.bar-label{width:90px;font-size:.8rem;color:#94a3b8;text-align:right;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{flex:1;height:20px;background:#334155;border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#6366f1);border-radius:4px;transition:width .3s}
+.bar-value{width:40px;font-size:.8rem;font-family:monospace;color:#94a3b8}
+.footer{text-align:center;margin-top:32px;color:#64748b;font-size:.8rem}
+.btn{display:inline-block;margin-top:10px;padding:8px 16px;background:#3b82f6;color:#fff;border-radius:8px;text-decoration:none;font-weight:500;font-size:.85rem}
+.btn:hover{background:#2563eb}
+.c-green{color:#10b981}.c-red{color:#ef4444}.c-yellow{color:#f59e0b}.c-blue{color:#3b82f6}.c-purple{color:#a78bfa}
+#live-status{text-align:center;color:#94a3b8;font-size:.8rem;margin-bottom:12px;display:none}
+.filters{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.filters input{background:#0f172a;border:1px solid #334155;border-radius:6px;padding:6px 10px;color:#f8fafc;font-size:.8rem}
+@media(max-width:768px){body{padding:12px}.metrics{grid-template-columns:repeat(2,1fr)}.header h1{font-size:1.3rem}.bar-label{width:60px}}
+</style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1>${escapeHtml(productName)} - Reconciliation Dashboard</h1>
-      <p class="subtitle">Period: ${escapeHtml(dateFrom)} to ${escapeHtml(dateTo)}</p>
-    </div>
+<div class="container">
+<div class="header">
+<h1>${escapeHtml(productName)}</h1>
+<p class="sub">Reconciliation Dashboard | ${escapeHtml(dateFrom)} to ${escapeHtml(dateTo)}</p>
+</div>
 
-    <div class="metrics-grid">
-      ${metricCard("Delivery Rate", formatRate(metrics.deliveryRate), t.colors.success)}
-      ${metricCard("Return Rate", formatRate(metrics.returnRate), t.colors.error)}
-      ${metricCard("Pending Rate", formatRate(metrics.pendingRate), t.colors.warning)}
-      ${metricCard("Total Orders", String(totalOrders), t.colors.primary)}
-    </div>
+<div id="live-status"></div>
 
-    <div class="section">
-      <h2>Shipment Summary</h2>
-      ${statRow("Total Shipped", metrics.shipped)}
-      ${statRow("Delivered", metrics.delivered)}
-      ${statRow("Returned", metrics.returned)}
-      ${statRow("Pending", metrics.pending)}
-    </div>
+<div class="metrics" id="metrics-grid">
+<div class="m-card"><div class="val c-blue" id="m-total">${totalOrders}</div><div class="lbl">Total Leads</div></div>
+<div class="m-card"><div class="val c-green" id="m-confirmed">${metrics.shipped > 0 ? metrics.delivered + metrics.returned + (metrics.pending || 0) : reconciledCount}</div><div class="lbl">Confirmed</div></div>
+<div class="m-card"><div class="val c-purple" id="m-shipped">${metrics.shipped}</div><div class="lbl">Shipped</div></div>
+<div class="m-card"><div class="val c-green" id="m-delivered">${metrics.delivered}</div><div class="lbl">Delivered</div></div>
+<div class="m-card"><div class="val c-red" id="m-returned">${metrics.returned}</div><div class="lbl">Returned</div></div>
+<div class="m-card"><div class="val c-green" id="m-delrate">${formatRate(metrics.deliveryRate)}</div><div class="lbl">Delivery Rate</div></div>
+<div class="m-card"><div class="val c-red" id="m-retrate">${formatRate(metrics.returnRate)}</div><div class="lbl">Return Rate</div></div>
+</div>
 
-    <div class="section">
-      <h2>Reconciliation Summary</h2>
-      ${statRow("Total Records", totalOrders)}
-      ${statRow("Reconciled", reconciledCount)}
-      ${statRow("Duplicates Found", duplicatesFound)}
-      ${statRow("Match Rate", formatRate(totalOrders > 0 ? reconciledCount / totalOrders : 0))}
-    </div>
+<div class="section">
+<h2>Reconciliation Summary</h2>
+<div class="stat-row"><span class="sl">Total Records</span><span class="sv" id="s-total">${totalOrders}</span></div>
+<div class="stat-row"><span class="sl">Reconciled</span><span class="sv" id="s-reconciled">${reconciledCount}</span></div>
+<div class="stat-row"><span class="sl">Duplicates Found</span><span class="sv" id="s-dupes">${duplicatesFound}</span></div>
+<div class="stat-row"><span class="sl">Match Rate</span><span class="sv">${formatRate(totalOrders > 0 ? reconciledCount / totalOrders : 0)}</span></div>
+</div>
 
-    ${sheetUrl ? (() => {
-      const safeUrl = sanitizeUrl(sheetUrl);
-      if (!safeUrl) return "";
-      return `
-    <div class="section" style="text-align: center;">
-      <h2>Data Sheet</h2>
-      <p style="color: ${t.colors.textSecondary};">View the full reconciliation spreadsheet</p>
-      <a href="${escapeHtml(safeUrl)}" target="_blank" class="sheet-link">Open Sheet</a>
-    </div>
-    `;
-    })() : ""}
+${cityPerformance.length > 0 ? `
+<div class="section">
+<h2>Top Cities (Orders)</h2>
+${cityBarsHtml}
+</div>
 
-    <div class="footer">
-      <p>Generated on ${new Date().toISOString().split("T")[0]} | MyDash Dashboard Builder</p>
-    </div>
-  </div>
+<div class="section">
+<h2>City Performance</h2>
+<div class="filters"><input type="text" id="city-filter" placeholder="Filter cities..." oninput="filterCities(this.value)"></div>
+<div style="overflow-x:auto">
+<table id="city-table">
+<thead><tr><th>City</th><th>Total</th><th>Confirmed</th><th>Shipped</th><th>Delivered</th><th>Returned</th><th>Del.Rate</th><th>Ret.Rate</th></tr></thead>
+<tbody id="city-tbody">
+${cityRowsHtml}
+</tbody>
+</table>
+</div>
+</div>
+` : ""}
+
+${safeSheetUrl ? `
+<div class="section" style="text-align:center">
+<h2>Data Sheet</h2>
+<p style="color:#94a3b8">View the full reconciliation spreadsheet</p>
+<a href="${escapeHtml(safeSheetUrl)}" target="_blank" class="btn">Open Sheet</a>
+</div>
+` : ""}
+
+<div class="footer">
+<p>Generated ${new Date().toISOString().split("T")[0]} | MyDash Dashboard Builder</p>
+</div>
+</div>
+
+<script>
+(function(){
+  // City filter functionality
+  window.filterCities = function(query) {
+    var rows = document.querySelectorAll('#city-tbody tr');
+    var q = query.toLowerCase();
+    rows.forEach(function(row) {
+      var city = row.cells[0].textContent.toLowerCase();
+      row.style.display = city.includes(q) ? '' : 'none';
+    });
+  };
+
+  // Live data fetching via window.DASHBOARD_DATA_API
+  if (window.DASHBOARD_DATA_API) {
+    var statusEl = document.getElementById('live-status');
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Loading live data...'; }
+
+    fetch(window.DASHBOARD_DATA_API)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (statusEl) { statusEl.textContent = 'Live data loaded at ' + new Date().toLocaleTimeString(); }
+        // Update metrics if live data provides them
+        if (data && data.metrics) {
+          var m = data.metrics;
+          var el;
+          el = document.getElementById('m-total'); if (el && m.totalOrders != null) el.textContent = m.totalOrders;
+          el = document.getElementById('m-shipped'); if (el && m.shipped != null) el.textContent = m.shipped;
+          el = document.getElementById('m-delivered'); if (el && m.delivered != null) el.textContent = m.delivered;
+          el = document.getElementById('m-returned'); if (el && m.returned != null) el.textContent = m.returned;
+          if (m.deliveryRate != null) {
+            el = document.getElementById('m-delrate'); if (el) el.textContent = (m.deliveryRate * 100).toFixed(1) + '%';
+          }
+          if (m.returnRate != null) {
+            el = document.getElementById('m-retrate'); if (el) el.textContent = (m.returnRate * 100).toFixed(1) + '%';
+          }
+        }
+      })
+      .catch(function(err) {
+        if (statusEl) { statusEl.textContent = 'Live data unavailable'; }
+        console.warn('Dashboard live data fetch failed:', err);
+      });
+  }
+})();
+</script>
 </body>
 </html>`;
 }
