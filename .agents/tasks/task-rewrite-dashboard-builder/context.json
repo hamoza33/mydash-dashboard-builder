@@ -1,0 +1,22 @@
+{
+  "project_type": "Next.js + TypeScript dashboard app with BullMQ pipeline worker",
+  "language": "TypeScript",
+  "build_system": "npm + Docker compose (Dockerfile.worker for the worker process)",
+  "test_framework": "Jest with ts-jest",
+  "build_command": "cd /projects/sandbox/mydash-dashboard-builder && npx tsc --noEmit",
+  "test_command": "cd /projects/sandbox/mydash-dashboard-builder && npx jest --passWithNoTests",
+  "verification_instructions": "1. Run tsc --noEmit to verify types. 2. Run jest to verify tests. 3. Run git push. 4. SSH to VPS, git pull, docker compose build. 5. Trigger a run via curl.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "npm ci in the project root",
+  "environment_constraints": "OPEN_INTERNET - full network access. VPS at 35.255.81.115 (user: aichaguimaoune, pass: Hamza@19951995). GitHub push available.",
+  "contribution_requirements": "Commit to main branch, push, rebuild on VPS with docker compose",
+  "key_patterns": "Pipeline worker fetches data from MCPs (COD leads/orders, LF orders, tracking), runs reconciliation engine that produces 45-column RowData[] arrays, then calls buildDashboardHtml(). The reference dashboard expects a JSON array of objects with 34 fields per row, gzipped and base64-encoded as a PAY constant in the HTML.",
+  "relevant_files": [
+    "src/lib/dashboard-builder.ts",
+    "src/workers/pipeline.worker.ts",
+    "src/lib/reconciliation/index.ts",
+    "src/lib/reconciliation/row-assembler.ts",
+    "src/lib/reconciliation/metrics.ts"
+  ],
+  "directory_structure": "src/lib/dashboard-builder.ts - the file to rewrite. src/workers/pipeline.worker.ts - calls buildDashboardHtml with config including reconciliationResult. src/lib/reconciliation/ - reconciliation engine producing rows with 45 columns."
+}

@@ -1,0 +1,24 @@
+{
+  "id": "FEAT-002",
+  "type": "chore",
+  "description": "Commit, push to GitHub, rebuild on VPS via Docker, and trigger a test run to verify the output matches the reference dashboard.",
+  "status": "pending",
+  "steps": [
+    "Step 1: Git add, commit with message 'feat: rewrite dashboard builder to match reference design', push to origin main",
+    "Step 2: SSH to VPS (sshpass -p 'Hamza@19951995' ssh -o StrictHostKeyChecking=no aichaguimaoune@35.255.81.115) and run: cd ~/apps/mydash-dashboard-builder && git pull origin main && docker compose build --no-cache && docker compose up -d",
+    "Step 3: Trigger test run: curl -X POST https://mydash.shopinzo.bond/api/runs -H 'Content-Type: application/json' -d '{\"product_name\":\"Varicose 3 vein cream - HB - Version 3\",\"lf_product_id\":\"prod_aDpxcS0svBWwkXizTuyJ0\",\"date_from\":\"2026-04-01\",\"date_to\":\"2026-06-18\",\"default_cc\":\"966\",\"output_filename\":\"COD_LF_Full_Merged.xlsx\"}'",
+    "Step 4: Verify the run completes by polling the run status endpoint"
+  ],
+  "acceptance_criteria": [
+    "Git push completes successfully",
+    "Docker compose build and up completes on VPS",
+    "Test run is triggered and returns a run ID"
+  ],
+  "verification": [
+    "Check git log shows the new commit on main",
+    "SSH to VPS and verify containers are running: docker compose ps",
+    "Verify run was triggered: check API response for run ID"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

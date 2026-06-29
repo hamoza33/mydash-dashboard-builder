@@ -1,0 +1,7 @@
+{
+  "task_id": "task-rewrite-dashboard-builder",
+  "task_description": "Rewrite dashboard-builder.ts to produce HTML output matching the reference dashboard at dash.shopinzo.bond, with gzip+base64 data payload, full CSS design system, charts, filters, tables, modals, and client-side JS. Then deploy and test.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001", "FEAT-002"],
+  "blocked_reason": null
+}

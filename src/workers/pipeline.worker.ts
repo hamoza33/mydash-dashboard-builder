@@ -389,63 +389,6 @@ function generateSlug(productName: string, date: string): string {
 }
 
 /**
- * City performance data structure for dashboard rendering.
- */
-export interface CityPerformanceEntry {
-  city: string;
-  total: number;
-  confirmed: number;
-  shipped: number;
-  delivered: number;
-  returned: number;
-}
-
-/**
- * Extracts city performance data from reconciled rows.
- * Uses Order City (column I, index 8) only.
- */
-function extractCityPerformance(rows: string[][]): CityPerformanceEntry[] {
-  const cityMap = new Map<string, CityPerformanceEntry>();
-
-  for (const row of rows) {
-    const city = (row[8] || "Unknown").trim() || "Unknown";
-    const orderStatus = (row[20] || "").toLowerCase(); // Column U: Order Status
-    const shippingStatus = (row[23] || "").toLowerCase(); // Column X: Shipping Status
-
-    if (!cityMap.has(city)) {
-      cityMap.set(city, { city, total: 0, confirmed: 0, shipped: 0, delivered: 0, returned: 0 });
-    }
-    const entry = cityMap.get(city)!;
-    entry.total++;
-
-    if (orderStatus === "confirmed" || orderStatus.includes("confirm")) {
-      entry.confirmed++;
-    }
-
-    if (shippingStatus) {
-      if (shippingStatus === "delivered" || shippingStatus.includes("delivered") || shippingStatus === "dlv") {
-        entry.delivered++;
-        entry.shipped++;
-      } else if (shippingStatus === "returned" || shippingStatus.includes("return") || shippingStatus === "rto") {
-        entry.returned++;
-        entry.shipped++;
-      } else if (
-        shippingStatus === "shipped" || shippingStatus === "in_transit" ||
-        shippingStatus === "transit" || shippingStatus === "pending" ||
-        shippingStatus.includes("transit")
-      ) {
-        entry.shipped++;
-      }
-    }
-  }
-
-  // Sort by total orders descending and return top 20 cities
-  return Array.from(cityMap.values())
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 20);
-}
-
-/**
  * Main pipeline processor.
  * Orchestrates the full dashboard pipeline from prompt loading through deployment.
  */
@@ -690,37 +633,15 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
     await updateRunStatus(runId, "running_dashboard_prompt", 7);
     await appendLog(runId, "Building dashboard HTML...");
 
-    // Extract city performance data from reconciled rows (using Order City, column I index 8)
-    const cityPerformance = extractCityPerformance(reconciliationResult.rows);
-
-    const dashboardHtml = buildDashboardHtml({
-      productName,
-      dateFrom,
-      dateTo,
-      metrics: reconciliationResult.metrics,
-      totalOrders: reconciliationResult.totalRecords,
-      reconciledCount: reconciliationResult.reconciledCount,
-      duplicatesFound: reconciliationResult.duplicatesFound,
-      sheetUrl,
-      cityPerformance,
-    });
-
-    // Step 9: Deploy dashboard via deploy_dashboard on IMPORT BOND
-    await updateRunStatus(runId, "deploying_dashboard", 8);
-    await appendLog(runId, "Deploying dashboard...");
-
+    // Generate slug before building dashboard (needed for DASHBOARD_DATA_API path)
     const importClient = mcpClients.import();
     let dashboardUrl: string | undefined;
     let dashboardSlug: string | undefined;
+    const today = new Date().toISOString().split("T")[0];
+    let baseSlug = generateSlug(productName, today);
+    let slug = baseSlug;
 
     if (importClient) {
-      const today = new Date().toISOString().split("T")[0];
-
-      // Generate slug: lowercase, hyphenated, URL-safe from product name + date
-      let baseSlug = generateSlug(productName, today);
-
-      // Check if slug exists by listing dashboards
-      let slug = baseSlug;
       try {
         const listResult = await callMcpTool(
           importClient,
@@ -744,10 +665,24 @@ export async function processPipeline(job: Job<DashboardPipelineJobData>) {
           }
         }
       } catch {
-        // If list fails, proceed with original slug
         await appendLog(runId, "WARN: Could not check existing dashboards, proceeding with generated slug");
       }
+    }
 
+    const dashboardHtml = buildDashboardHtml({
+      productName,
+      dateFrom,
+      dateTo,
+      reconciliationRows: reconciliationResult.rows,
+      sheetUrl,
+      dashboardSlug: slug,
+    });
+
+    // Step 9: Deploy dashboard via deploy_dashboard on IMPORT BOND
+    await updateRunStatus(runId, "deploying_dashboard", 8);
+    await appendLog(runId, "Deploying dashboard...");
+
+    if (importClient) {
       // Deploy with correct schema
       const dashboardName = `${productName} \u2014 ${today}`;
       const deployResult = await callMcpTool(

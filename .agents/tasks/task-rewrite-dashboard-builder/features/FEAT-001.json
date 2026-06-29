@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Rewrite src/lib/dashboard-builder.ts to produce a reference-matching HTML dashboard with gzip+base64 encoded data payload, full CSS design system, charts, filters, tables, modals, and all client-side JS. Also update the pipeline worker to pass raw rows to the builder.",
+  "status": "in_progress",
+  "steps": [
+    "Step 1: Rewrite src/lib/dashboard-builder.ts with a new interface that accepts: productName, dateFrom, dateTo, reconciliationRows (RowData[]), sheetUrl, and dashboardSlug. The function must: (a) Transform the 45-column RowData[] into a JSON array of objects with 34 fields matching the reference format: lead_id, lead_status, lead_date, lead_name, phone, city, country, lead_qty, lead_price, currency, sku, order_id, order_status, order_total, order_qty, order_date, tracking, track_status, carrier, norm_status, latest_status, status_detail, latest_update, undelivery, origin_city, dest_city, lf_order, lf_date, lf_total, lf_fin_status, funnel_url, utm_source, utm_medium, utm_campaign. (b) Gzip compress the JSON array, then base64 encode it as a PAY constant. (c) Generate the full HTML matching the reference exactly.",
+    "Step 2: The HTML must include: Google Fonts (DM Mono), CSS design system with variables --bg:#07080d, --s1:#0f1018, --s2:#161820, --s3:#1e2030, --border:#272a3a, --border2:#343748, --green:#4ade80, --red:#f87171, --amber:#fbbf24, --blue:#60a5fa, --violet:#a78bfa, --cyan:#22d3ee, --text:#e2e4f0, --text2:#9099b8, --text3:#555d7a. Body scanline effect. All CSS classes: .top1, .brand, .badge, .stats, .stat, .tabs, .tab, .kpis, .k, .filters, .card, .grid, .g2, .g3, .g21, .row, .name, .bar, .num, .funnel, .trap, .matrix, .tbl, .score, .pill, .leader, .daily, .day, .seg, .leg, .dot, .vbars, .vb, .vbl, .don, .pg, .modal, .box, .mh, .x, .kv.",
+    "Step 3: The HTML must include the first script tag that sets window.DASHBOARD_DATA_API (using the slug) and window.DASHBOARD_SHEET_URL, with a 30s poll interval.",
+    "Step 4: The HTML must include the second script tag with the PAY constant followed by the full client-side JS: boot() function that decompresses and parses PAY, init() that sets up filters/tabs/events, render functions for Analytics and Lead Explorer tabs. All 14+ chart functions: campaign (dual bar), carrier (multi-bar with del/ret/pending), city performance (single bar by delivery%), funnel (trapezoid), return reasons, matrix (sortable table), top campaigns (score), daily volume (stacked), price tier (vgroup), donut (SVG tracking mix), order qty (vgroup), country (dual), funnel URL (dual), UTM source (dual). Lead Explorer with 12-column sortable table, pagination (10/25/50), search, independent filters. Modal on row click showing 22 fields.",
+    "Step 5: The field mapping from RowData (45 columns) to dashboard JSON: lead_id=row[0], lead_status=row[20], lead_date=row[1], lead_name=row[2]+' '+row[3], phone=row[4], city=row[8], country=row[7], lead_qty=parseNum(row[14]), lead_price=parseNum(row[15]), currency=row[17], sku=row[13], order_id=row[0], order_status=row[20], order_total=parseNum(row[16]), order_qty=parseNum(row[14]), order_date=row[1], tracking=row[22], track_status=row[23], carrier=(extract from tracking data), norm_status=(normalize from row[23] to Delivered/Returned/In Transit/Out for Delivery/Not Found), latest_status=row[23], status_detail='', latest_update='', undelivery=row[27], origin_city='', dest_city='', lf_order=row[35], lf_date='', lf_total=parseNum(row[16]), lf_fin_status=row[36], funnel_url=(from source data), utm_source=row[30] if it looks like a source else '', utm_medium='', utm_campaign=row[31].",
+    "Step 6: Update src/workers/pipeline.worker.ts to pass reconciliationResult.rows and the generated slug to buildDashboardHtml instead of the current metrics-only config. Keep the existing interface backward compatible or update the call site.",
+    "Step 7: Ensure the output HTML is under 60KB by using compact/minified JS (no unnecessary whitespace in the script), and only including the data payload.",
+    "Step 8: All delivery rates use shipped (rows with a tracking number) as denominator. City Performance uses Order City (column I, index 8). Norm_status normalization: map shipping status values to Delivered, Returned, In Transit, Out for Delivery, or Not Found.",
+    "Step 9: Header shows product name, lead badge with count, quick stats (Conf%, Del%, Return%, Avg SAR), date period, and two tabs (Analytics / Lead Explorer). 6 KPI cards: Total Leads, Confirmed, Delivered, Returned, In Transit/OFD, Avg Order Value."
+  ],
+  "acceptance_criteria": [
+    "Running `npx tsc --noEmit` in the project root passes with no type errors",
+    "The buildDashboardHtml function produces a self-contained HTML string under 60KB",
+    "The HTML contains a gzip+base64 encoded PAY constant that decompresses to a JSON array of objects",
+    "The HTML renders Analytics tab with all 14 chart sections matching the reference",
+    "The HTML renders Lead Explorer tab with sortable/filterable/paged table",
+    "The HTML includes the CSS design system with all required CSS variables",
+    "The HTML includes window.DASHBOARD_DATA_API for live data polling",
+    "The pipeline worker passes raw rows to buildDashboardHtml correctly"
+  ],
+  "verification": [
+    "Run `cd /projects/sandbox/mydash-dashboard-builder && npx tsc --noEmit` to verify types",
+    "Run `cd /projects/sandbox/mydash-dashboard-builder && npx jest --passWithNoTests` to verify tests",
+    "Run git push to GitHub and rebuild on VPS"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}
