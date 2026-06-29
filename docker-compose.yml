@@ -1,8 +1,9 @@
 services:
   redis:
     image: redis:7-alpine
+    container_name: mydash-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -16,14 +17,16 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "8127:3000"
     depends_on:
       redis:
         condition: service_healthy
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://mydash-redis:6379
+    volumes:
+      - sqlite-data:/app/prisma
 
   worker:
     build:
@@ -35,26 +38,11 @@ services:
     env_file:
       - .env
     environment:
-      - REDIS_URL=redis://redis:6379
+      - REDIS_URL=redis://mydash-redis:6379
+    volumes:
+      - sqlite-data:/app/prisma
     restart: unless-stopped
-
-  # Uncomment for PostgreSQL (production)
-  # postgres:
-  #   image: postgres:16-alpine
-  #   ports:
-  #     - "5432:5432"
-  #   environment:
-  #     POSTGRES_USER: mydash
-  #     POSTGRES_PASSWORD: mydash
-  #     POSTGRES_DB: mydash
-  #   volumes:
-  #     - postgres-data:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test: ["CMD-ARGS", "pg_isready", "-U", "mydash"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 3
 
 volumes:
   redis-data:
-  # postgres-data:
+  sqlite-data:
